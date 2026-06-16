@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Verify modules are tidy
+        run: |
+          go mod tidy
+          # No explicit go.sum path: it doesn't exist until the first external
+          # dep (H1), and `git diff -- go.sum` would fatal on a missing path.
+          git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+      # Guards that internal/schema/schemas did not drift from contracts/schemas.
+      # Enabled from H1 onward (the embed dir is created with the schema validator).
+      - name: Check schema drift
+        run: |
+          if [ -d internal/schema/schemas ]; then make check-schemas; else echo "no embedded schemas yet (pre-H1) — skipping"; fi
+
+      - name: Test
+        run: go test -race ./...
+
+      # Integration tests (testcontainers) are added in H3; gated behind a build tag
+      # so the default unit run stays Docker-free.
+      # - name: Integration tests
+      #   run: go test -race -tags=integration ./test/integration/...

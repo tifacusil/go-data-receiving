@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "message_id": "a3bb189e-8bf9-3888-9912-ace4e6543002",
+  "project_id": "lingzhan",
+  "sensor_id": "LZ-DB01",
+  "sensor_type": "deep_displacement",
+  "timestamp": "2019-06-15T06:00:00Z",
+  "received_at": "2019-06-15T06:00:07Z",
+  "sampling_interval_seconds": 3600,
+  "payload": {
+    "depth_m": 15.0,
+    "tilt_x_mm": 3.21,
+    "tilt_y_mm": -1.54,
+    "cumulative_tilt_mm": 48.7
+  }
+}

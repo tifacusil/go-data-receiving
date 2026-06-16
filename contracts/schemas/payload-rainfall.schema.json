@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide-monitoring/schemas/payload-rainfall.schema.json",
+  "title": "Rainfall payload",
+  "description": "Payload for sensor_type = rainfall. Rain gauge readings.",
+  "type": "object",
+  "required": ["rainfall_mm", "cumulative_rainfall_mm", "interval_minutes"],
+  "additionalProperties": false,
+  "properties": {
+    "rainfall_mm": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Rain fallen during the interval (mm)."
+    },
+    "cumulative_rainfall_mm": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cumulative rainfall since season start. Figure 8b of the paper."
+    },
+    "interval_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440,
+      "description": "Duration of the measurement interval in minutes. Typically 60."
+    }
+  }
+}

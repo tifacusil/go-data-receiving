@@ -1,0 +1,29 @@
+# golangci-lint v2 configuration for the data-receiving microservice.
+# Kept conservative for H0 so the bootstrap stays green; tighten per milestone.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - bodyclose
+    - errorlint
+  exclusions:
+    rules:
+      # Test files may use dot-imports and looser error handling.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+# In v2, gofmt/goimports moved out of `linters` into their own `formatters` block.
+formatters:
+  enable:
+    - gofmt
+    - goimports

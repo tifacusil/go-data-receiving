@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "message_id": "16fd2706-8baf-433b-82eb-8c7fada847da",
+  "project_id": "shangtan",
+  "sensor_id": "GXZM-SP01",
+  "sensor_type": "soil_pressure",
+  "timestamp": "2026-05-02T14:00:00Z",
+  "received_at": "2026-05-02T14:00:03Z",
+  "sampling_interval_seconds": 3600,
+  "payload": {
+    "pressure_kpa": 45.2,
+    "temperature_celsius": 18.7
+  }
+}

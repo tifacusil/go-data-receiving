@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide-monitoring/schemas/payload-strain.schema.json",
+  "title": "Strain payload",
+  "description": "Payload for sensor_type = strain. Extensometer readings, typically from anti-slide piles.",
+  "type": "object",
+  "required": ["strain_microstrain"],
+  "additionalProperties": false,
+  "properties": {
+    "strain_microstrain": {
+      "type": "number",
+      "description": "Strain reading in microstrain (us)."
+    },
+    "temperature_celsius": {
+      "type": "number",
+      "minimum": -40,
+      "maximum": 80,
+      "description": "Sensor temperature for compensation. Recommended but optional."
+    }
+  }
+}

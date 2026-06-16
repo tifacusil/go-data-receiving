@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "message_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "project_id": "shangtan",
+  "sensor_id": "GXZM-RG01",
+  "sensor_type": "rainfall",
+  "timestamp": "2026-05-02T14:00:00Z",
+  "received_at": "2026-05-02T14:00:08Z",
+  "sampling_interval_seconds": 3600,
+  "payload": {
+    "rainfall_mm": 2.4,
+    "cumulative_rainfall_mm": 1547.2,
+    "interval_minutes": 60
+  }
+}

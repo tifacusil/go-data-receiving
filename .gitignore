@@ -1,0 +1,23 @@
+# Binaries — anchored to repo root so they don't match the cmd/data-receiving/ source dir
+/bin/
+/dist/
+/data-receiving
+/data-receiving.exe
+
+# Test artifacts
+*.out
+coverage.*
+
+# Runtime output dirs (mirror of C# .gitignore: dlx/, output/)
+/dlx/
+/output/
+
+# Secrets — never commit. Real values live in /etc/data-receiving/secrets
+.env
+
+# IDE / OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
