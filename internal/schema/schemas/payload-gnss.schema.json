@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide-monitoring/schemas/payload-gnss.schema.json",
+  "title": "GNSS payload",
+  "description": "Payload for sensor_type = gnss. Surface displacement readings from GNSS receivers.",
+  "type": "object",
+  "required": [
+    "displacement_x_mm",
+    "displacement_y_mm",
+    "displacement_z_mm",
+    "displacement_horizontal_mm",
+    "cumulative_displacement_mm",
+    "fix_quality"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "displacement_x_mm": {
+      "type": "number",
+      "description": "East-west component of displacement (mm)."
+    },
+    "displacement_y_mm": {
+      "type": "number",
+      "description": "North-south component of displacement (mm)."
+    },
+    "displacement_z_mm": {
+      "type": "number",
+      "description": "Vertical component of displacement (mm)."
+    },
+    "displacement_horizontal_mm": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Horizontal magnitude: sqrt(x^2 + y^2). Redundant but useful downstream."
+    },
+    "cumulative_displacement_mm": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cumulative displacement from baseline. Plotted in Figure 8a of the paper."
+    },
+    "fix_quality": {
+      "type": "string",
+      "enum": ["rtk_fixed", "rtk_float", "dgps", "single", "no_fix"],
+      "description": "GNSS solution quality. Only rtk_fixed is reliable at mm level."
+    }
+  }
+}

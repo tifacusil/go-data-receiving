@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide-monitoring/schemas/payload-soil-pressure.schema.json",
+  "title": "Soil pressure payload",
+  "description": "Payload for sensor_type = soil_pressure. Earth pressure gauge readings.",
+  "type": "object",
+  "required": ["pressure_kpa"],
+  "additionalProperties": false,
+  "properties": {
+    "pressure_kpa": {
+      "type": "number",
+      "description": "Soil pressure in kilopascals."
+    },
+    "temperature_celsius": {
+      "type": "number",
+      "minimum": -40,
+      "maximum": 80,
+      "description": "Sensor temperature. Optional."
+    }
+  }
+}

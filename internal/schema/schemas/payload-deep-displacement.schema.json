@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://landslide-monitoring/schemas/payload-deep-displacement.schema.json",
+  "title": "Deep displacement payload",
+  "description": "Payload for sensor_type = deep_displacement. Inclinometer readings at a single depth point. Multiple depths from the same sensor at the same timestamp travel as separate messages.",
+  "type": "object",
+  "required": ["depth_m", "tilt_x_mm", "tilt_y_mm", "cumulative_tilt_mm"],
+  "additionalProperties": false,
+  "properties": {
+    "depth_m": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Depth of the reading, in meters."
+    },
+    "tilt_x_mm": {
+      "type": "number",
+      "description": "Tilt in mm along the X axis."
+    },
+    "tilt_y_mm": {
+      "type": "number",
+      "description": "Tilt in mm along the Y axis."
+    },
+    "cumulative_tilt_mm": {
+      "type": "number",
+      "description": "Cumulative tilt from baseline. Figure 4 of the paper plots this vs depth."
+    }
+  }
+}
