@@ -60,14 +60,17 @@ aparte, no exponer paquetes desde aquí.
 El orden lo dicta la cadena de dependencias: primero lo que no necesita servicios
 externos. Cada hito entrega valor verificable de forma aislada.
 
-### H0 — Bootstrap  ·  _infra_  ·  ✅ en curso
+**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4–H7 pendientes.
+Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
+
+### H0 — Bootstrap  ·  _infra_  ·  ✅ hecho (`64ead16`)
 - **Entregables:** `go.mod`, layout base, `cmd/data-receiving/main.go` (con `version`),
   `internal/app/app.go` (esqueleto), `Makefile`, `.golangci.yml`, `.gitignore`, CI base
   (tidy + vet + lint + test), copia de `contracts/` desde el repo C#.
 - **Verificación:** `go build ./...` y `go vet ./...` verdes; `data-receiving version`
   imprime la versión; lint sin errores.
 
-### H1 — Parsing puro  ·  _Card 2A1 (1/2)_
+### H1 — Parsing puro  ·  _Card 2A1 (1/2)_  ·  ✅ hecho (`2af7f60`)
 - **Entregables:** `internal/parsing` completo (CRC-16/CCITT-FALSE, FrameValidator,
   EnvelopeDecoder, 5 PayloadDecoders, serializer snake_case con floats a 4 decimales) +
   `internal/schema` (`//go:embed schemas/*.json` + `santhosh-tekuri/jsonschema/v6`).
@@ -77,7 +80,7 @@ externos. Cada hito entrega valor verificable de forma aislada.
   byte-igual al C#**; contract test `contracts/examples/*` válidos contra los schemas.
   Todo verde sin Docker.
 
-### H2 — TCP + ACK + DLX + sinks locales  ·  _Card 2A1 (2/2)_
+### H2 — TCP + ACK + DLX + sinks locales  ·  _Card 2A1 (2/2)_  ·  ✅ hecho (`f081ab6`)
 - **Entregables:** `internal/tcp` (server, framereader length-prefixed, ACK
   `[0xAA,0x55,status,code,0xAA]`, status), `internal/deadletter` (LocalDlxWriter),
   `internal/sink` (stdout/file/null), `internal/config`, composition root real en
@@ -87,19 +90,32 @@ externos. Cada hito entrega valor verificable de forma aislada.
   envelope en sink + ACK `AA 55 00 00 AA`; CRC malo → ACK status `0x01` + archivo DLX.
   Verde sin Docker.
 
-### H3 — Redis + RabbitMQ + RetryWorker  ·  _Card 2A2_
-- **Entregables:** `internal/buffer` (`go-redis/v9`, key `sensor_buffer:{message_id}`,
-  TTL 24h, wrapper JSON, RetryWorker cada 30s / minAge 2m — **1:1 con baseline**),
+### H3 — Redis + RabbitMQ + RetryWorker  ·  _Card 2A2_  ·  ✅ hecho (`e0e1067`)
+- **Entregables:** `internal/buffer` (`go-redis/v9` fijado a `v9.7.3` por compat con Go
+  1.23, key `sensor_buffer:{message_id}`, TTL 24h, wrapper JSON snake_case, RetryWorker
+  cada 30s / minAge 2m — **1:1 con baseline**, `// TODO(SE-practice)` para el backoff),
   `internal/messaging` (`amqp091-go` con **publisher confirms**, routing
-  `sensors.{project}.{type}`, exchange `sensors.raw`, persistent, timeout 5s),
-  `internal/sink/rabbitmq.go` (Set→Publish→Delete). Wiring condicional por `OutputMode`.
-- **Verificación:** unit con fakes (borra solo tras confirm; deja en buffer si falla);
-  **integration con testcontainers** (port de `BufferPublishIntegrationTests.cs`):
-  publicar → cola recibe + buffer vacío; caída de RabbitMQ → entrada persiste →
-  RetryWorker reenvía al recuperarse; routing keys correctas.
-  `go test -tags=integration` verde.
+  `sensors.{project}.{type}`, exchange `sensors.raw`, persistent, timeout 5s, canal
+  serializado con mutex; **solo publica, nunca declara topología** — el usuario
+  `data_receiving` no tiene permiso `configure`), `internal/sink/rabbitmq.go`
+  (Set→Publish→Delete; si el publish falla la entrada queda en Redis y `Write` devuelve
+  nil → ACK de éxito, igual que el C#). Wiring condicional por `OutputMode` en
+  `internal/app/wiring.go` con teardown ordenado.
+- **Verificación:** unit con fakes (borra solo tras confirm; deja en buffer si falla;
+  error si falla el buffering; retry republica/conserva; parse del connection string).
+  **Integration contra la infra local viva** (tag `integration`, no testcontainers —
+  se usa el stack `landslide-infra` que ya corre; env `IT_RABBITMQ_URL` /
+  `IT_RABBITMQ_ADMIN_URL` / `RECEIVER__REDIS__CONNECTIONSTRING`, defaults al stack local):
+  publicar → mensaje en `data_management.persist` + buffer vacío; RabbitMQ caído →
+  entrada persiste → RetryWorker reenvía. **Smoke e2e completo verificado**: frame TCP →
+  ACK `AA 55 00 00 AA` → envelope entregado en `data_management.persist` con JSON
+  byte-exacto. `go test -tags=integration` verde.
+- **Infra:** los `password_hash` de RabbitMQ en `tesis-infra/local/infra/rabbitmq/
+  definitions.json` estaban vacíos; se poblaron con hashes SHA256 (commit `53b4287` en
+  tesis-infra) de los plaintext de `envs/rabbitmq.env`. Creds activas: `admin` /
+  `XLrCTo51s4n50qy8GQ`, `data_receiving` / `changeme_data_receiving`.
 
-### H4 — Consul + Health REAL  ·  _Card 2A3 + mejora SE_
+### H4 — Consul + Health REAL  ·  _Card 2A3 + mejora SE_  ·  ⏭️ siguiente
 - **Entregables:** `internal/discovery` (registro/deregistro en Consul: name
   `data-receiving`, id `data-receiving-{InstanceId}`, tags, check HTTP cada 10s),
   `internal/health`. **Mejora obligatoria (CLAUDE.md §1.6/§4):** el checker verifica TCP
@@ -130,6 +146,9 @@ externos. Cada hito entrega valor verificable de forma aislada.
   (redis+rabbitmq+consul+prometheus), `.env.example` y systemd unit portados (mismas
   claves `RECEIVER__*` que el deploy Wave 1), `prometheus.yml`. CI completo:
   build+vet+lint+unit+contract+integration+`-race` + job de drift de schemas.
+  **Pendiente de H3:** los integration tests apuntan hoy a la infra local viva; para
+  CI hay que levantar el stack (services del runner o testcontainers) y fijar los env
+  `IT_RABBITMQ_*` / `RECEIVER__REDIS__CONNECTIONSTRING` contra él.
 - **Verificación:** `docker compose up` → servicio `passing` en Consul + `/metrics`;
   pipeline verde; corre con los `.env` existentes sin cambiar claves.
 
