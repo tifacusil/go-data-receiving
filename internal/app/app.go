@@ -2,8 +2,8 @@
 //
 // It is the Go equivalent of the C# Program.cs: it loads configuration, builds
 // the parser, sink and dead-letter writer, and runs the TCP server (plus, in
-// OutputMode=rabbitmq, the Redis buffer / RabbitMQ publisher / Consul / health
-// endpoint — added in later milestones) as goroutines under an errgroup with a
+// OutputMode=rabbitmq, the Redis buffer / RabbitMQ publisher / RetryWorker —
+// and, from H4, Consul + health) as goroutines under an errgroup with a
 // cancellable context.
 package app
 
@@ -46,19 +46,30 @@ func Run(ctx context.Context, version string) error {
 		return err
 	}
 
-	out, err := buildSink(cfg, logger)
-	if err != nil {
-		return err
+	g, ctx := errgroup.WithContext(ctx)
+
+	// In rabbitmq mode the sink is backed by Redis + RabbitMQ and a RetryWorker
+	// runs alongside the TCP server. Other modes use a local sink only.
+	var out sink.Sink
+	if cfg.OutputMode == "rabbitmq" {
+		rmq, err := newRabbitMQStack(cfg, logger)
+		if err != nil {
+			return err
+		}
+		defer rmq.close(logger)
+		out = rmq.sink
+		g.Go(func() error { return rmq.retry.Run(ctx) })
+		// TODO(H4): start the health endpoint and register in Consul.
+	} else {
+		out, err = buildLocalSink(cfg)
+		if err != nil {
+			return err
+		}
 	}
 
 	status := tcp.NewStatus()
 	server := tcp.NewServer(cfg.Port, parser, out, dlx, status, logger)
-
-	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return server.Run(ctx) })
-
-	// TODO(H3): OutputMode=rabbitmq → start Redis buffer, RabbitMQ publisher, RetryWorker.
-	// TODO(H4): start the health endpoint and register in Consul.
 
 	if err := g.Wait(); err != nil && ctx.Err() == nil {
 		return err
@@ -67,10 +78,8 @@ func Run(ctx context.Context, version string) error {
 	return nil
 }
 
-// buildSink selects the output sink from OutputMode, matching the C# switch.
-// rabbitmq is not wired until H3; for now it is rejected explicitly rather than
-// silently degrading.
-func buildSink(cfg config.Config, _ *slog.Logger) (sink.Sink, error) {
+// buildLocalSink selects a no-dependency sink from OutputMode.
+func buildLocalSink(cfg config.Config) (sink.Sink, error) {
 	switch cfg.OutputMode {
 	case "file":
 		return sink.NewFile(cfg.OutputFilePath)
@@ -78,9 +87,6 @@ func buildSink(cfg config.Config, _ *slog.Logger) (sink.Sink, error) {
 		return sink.NewNull(), nil
 	case "stdout":
 		return sink.NewStdout(), nil
-	case "rabbitmq":
-		// TODO(H3): construct the Redis-buffered RabbitMQ sink.
-		return nil, fmt.Errorf("OutputMode=rabbitmq not implemented until H3")
 	default:
 		return sink.NewStdout(), nil
 	}
