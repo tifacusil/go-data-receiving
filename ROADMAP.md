@@ -60,7 +60,7 @@ aparte, no exponer paquetes desde aquí.
 El orden lo dicta la cadena de dependencias: primero lo que no necesita servicios
 externos. Cada hito entrega valor verificable de forma aislada.
 
-**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5 ✅ · H6–H7 pendientes.
+**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5 ✅ · H6 ✅ · H7 pendiente.
 Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
 
 ### H0 — Bootstrap  ·  _infra_  ·  ✅ hecho (`64ead16`)
@@ -168,10 +168,21 @@ Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
 - **Verificación:** `/metrics` expone los colectores; procesar un frame incrementa los
   counters y registra latencia; logs JSON parseables; span exportado.
 
-### H6 — CDCT con pact-go  ·  _EXTRA CLAUDE.md §3.3_
-- **Entregables:** `test/pact` con message pact AMQP (data-receiving como productor de
-  `sensors.{project}.{type}`).
-- **Verificación:** `pact-go verify` verde, pact file generado, CI ejecuta contract+pact.
+### H6 — CDCT con pact-go  ·  _EXTRA CLAUDE.md §3.3_  ·  ✅ hecho
+- **Hecho:** `test/pact` (build tag `pact`) con message pact AMQP asíncrono
+  (pact-go v2 `message/v4`): consumer `data-management`, provider `data-receiving`,
+  contrato del envelope GNSS publicado bajo `sensors.shangtan.gnss`. Matchers por tipo
+  (UUID, Term para enums/regex, Decimal, Integer). El handler consumidor valida el body
+  generado contra **nuestro** `schema.Validator` → si productor y expectativa divergen,
+  falla. Backstop FFI-free `TestSerializerMatchesContractExamples`. Target `make test-pact`.
+- **Verificado:** `go test -tags=pact ./test/pact/...` verde; pact file generado
+  (`test/pact/pacts/data-management-data-receiving.json`, gitignored — nondeterminista por
+  UUID, se publica a broker). Lint 0 con tag pact. Default build/test no afectados (gated).
+- **Setup (documentado en Makefile):** requiere lib FFI nativa
+  (`go run github.com/pact-foundation/pact-go/v2 install` → `pact_ffi.dll`). En Windows el
+  linker cgo necesita una import lib generada del DLL:
+  `gendef pact_ffi.dll && dlltool -d pact_ffi.def -l libpact_ffi.dll.a -D pact_ffi.dll`,
+  con `CGO_LDFLAGS=-L<libdir>` y el dir en `PATH`.
 
 ### H7 — Deploy + CI/CD  ·  _infra_
 - **Entregables:** `Dockerfile` multi-stage, `docker-compose.yml`

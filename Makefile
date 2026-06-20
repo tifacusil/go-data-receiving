@@ -11,7 +11,7 @@ LDFLAGS     := -X main.version=$(VERSION)
 CONTRACTS_SCHEMAS := contracts/schemas
 EMBED_SCHEMAS     := internal/schema/schemas
 
-.PHONY: all build run test test-integration vet lint fmt ci sync-schemas check-schemas clean tidy
+.PHONY: all build run test test-integration test-pact vet lint fmt ci sync-schemas check-schemas clean tidy
 
 all: build
 
@@ -26,6 +26,15 @@ test: ## Run unit + contract tests (no Docker required)
 
 test-integration: ## Run integration tests (requires Docker / testcontainers)
 	go test -race -tags=integration ./test/integration/...
+
+# CDCT message pacts (CLAUDE.md §3.3). Requires the pact FFI native lib:
+#   go run github.com/pact-foundation/pact-go/v2 install
+# On Windows the linker needs an import library generated from the DLL:
+#   cd <libdir> && gendef pact_ffi.dll && \
+#     dlltool -d pact_ffi.def -l libpact_ffi.dll.a -D pact_ffi.dll
+# Then point the linker/loader at it (libdir defaults to /usr/local/lib).
+test-pact: ## Run consumer-driven contract tests (requires pact FFI lib)
+	CGO_ENABLED=1 go test -tags=pact ./test/pact/...
 
 vet:
 	go vet $(PKG)
