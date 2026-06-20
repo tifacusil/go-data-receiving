@@ -54,6 +54,15 @@ func (r *Registration) Run(ctx context.Context) error {
 	return nil
 }
 
+// healthHost returns the host Consul should use to reach /health, defaulting to
+// localhost when unset (Wave 1 layout: Consul agent on the same host).
+func (r *Registration) healthHost() string {
+	if r.cfg.HealthCheckHost == "" {
+		return "localhost"
+	}
+	return r.cfg.HealthCheckHost
+}
+
 func (r *Registration) register() error {
 	reg := &consul.AgentServiceRegistration{
 		ID:   r.serviceID,
@@ -65,7 +74,7 @@ func (r *Registration) register() error {
 			"instance:" + r.cfg.InstanceID,
 		},
 		Check: &consul.AgentServiceCheck{
-			HTTP:                           fmt.Sprintf("http://localhost:%d/health/", r.cfg.HealthPort),
+			HTTP:                           fmt.Sprintf("http://%s:%d/health/", r.healthHost(), r.cfg.HealthPort),
 			Interval:                       "10s",
 			Timeout:                        "5s",
 			DeregisterCriticalServiceAfter: "1m",

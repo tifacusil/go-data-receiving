@@ -60,7 +60,7 @@ aparte, no exponer paquetes desde aquí.
 El orden lo dicta la cadena de dependencias: primero lo que no necesita servicios
 externos. Cada hito entrega valor verificable de forma aislada.
 
-**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5 ✅ · H6 ✅ · H7 pendiente.
+**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5 ✅ · H6 ✅ · H7 ✅ — **reescritura completa**.
 Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
 
 ### H0 — Bootstrap  ·  _infra_  ·  ✅ hecho (`64ead16`)
@@ -184,16 +184,29 @@ Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
   `gendef pact_ffi.dll && dlltool -d pact_ffi.def -l libpact_ffi.dll.a -D pact_ffi.dll`,
   con `CGO_LDFLAGS=-L<libdir>` y el dir en `PATH`.
 
-### H7 — Deploy + CI/CD  ·  _infra_
-- **Entregables:** `Dockerfile` multi-stage, `docker-compose.yml`
-  (redis+rabbitmq+consul+prometheus), `.env.example` y systemd unit portados (mismas
-  claves `RECEIVER__*` que el deploy Wave 1), `prometheus.yml`. CI completo:
-  build+vet+lint+unit+contract+integration+`-race` + job de drift de schemas.
-  **Pendiente de H3:** los integration tests apuntan hoy a la infra local viva; para
-  CI hay que levantar el stack (services del runner o testcontainers) y fijar los env
-  `IT_RABBITMQ_*` / `RECEIVER__REDIS__CONNECTIONSTRING` contra él.
-- **Verificación:** `docker compose up` → servicio `passing` en Consul + `/metrics`;
-  pipeline verde; corre con los `.env` existentes sin cambiar claves.
+### H7 — Deploy + CI/CD  ·  _infra_  ·  ✅ hecho
+- **Hecho:** `deploy/Dockerfile` multi-stage (build Go 1.23-alpine → binario estático
+  `CGO_ENABLED=0`, runtime distroless static nonroot, ~21 MB; schemas embebidos vía
+  go:embed, sin archivos extra). `deploy/.env.example` y `deploy/data-receiving.service`
+  (systemd) portados del C# con las mismas claves `RECEIVER__*` (ExecStart al binario Go,
+  sin `DOTNET_ENVIRONMENT`, `+ HEALTHCHECKHOST`). `.dockerignore`. Pipelines separados:
+  - **CI** (`.github/workflows/ci.yml`, push+PR a main): tidy + golangci-lint v2 + drift de
+    schemas + `go build` + `go test -race` (unit+contract). Docker-free.
+  - **CD** (`.github/workflows/cd.yml`, push a main): build de imagen y push a GHCR
+    (`ghcr.io/<repo>`, tags `latest` + sha corto) con docker login/metadata/build-push
+    actions y permiso `packages: write`.
+  - Integration tests (redis/rabbitmq/consul) corren **localmente** vs infra viva
+    (`make test-integration`), no en CI.
+- **Fix de H4 aplicado:** `ConsulConfig.HealthCheckHost` (env
+  `RECEIVER__CONSUL__HEALTHCHECKHOST`, default `localhost`) — la URL del health check en
+  Consul ahora es configurable. Con Consul en contenedor se setea al hostname del servicio
+  (en lugar de `localhost`) para que el check pase. En Wave 1 (agente Consul en el host) el
+  default sigue siendo correcto.
+- **Verificado:** imagen construye y `data-receiving version` corre (21.3 MB); default
+  build/test/vet/lint 0 verdes; integration Consul verde (default localhost intacto); sin
+  drift de schemas.
+- **Nota de alcance:** el `docker-compose.yml` de despliegue y `prometheus.yml` viven en el
+  repo **tesis-infra** (no aquí); este repo solo aporta el `Dockerfile` y el pipeline CI.
 
 ## Prácticas de CLAUDE.md vs baseline C#
 

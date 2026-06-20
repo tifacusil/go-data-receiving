@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/dlx/
+/output/
+/test/pact/pacts/
+/test/pact/logs/
+.env
+.git/
+.github/
+*.md

@@ -73,6 +73,13 @@ type ConsulConfig struct {
 	HealthPort     int    `env:"HEALTHPORT" envDefault:"8080"`
 	ServiceVersion string `env:"SERVICEVERSION" envDefault:"1.0.0"`
 	Environment    string `env:"ENVIRONMENT" envDefault:"prod"`
+
+	// HealthCheckHost is the host Consul uses to reach this service's /health
+	// endpoint. Defaults to localhost (Consul agent on the same host, as in
+	// Wave 1). When Consul runs in a container it cannot reach the host via
+	// localhost, so set this to the service's reachable address (e.g. the
+	// container name or host IP).
+	HealthCheckHost string `env:"HEALTHCHECKHOST" envDefault:"localhost"`
 }
 
 // Load reads the configuration from the environment using the RECEIVER__ prefix.
