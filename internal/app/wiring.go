@@ -20,6 +20,7 @@ type rabbitmqStack struct {
 	channel *amqp.Channel
 	sink    sink.Sink
 	retry   *buffer.RetryWorker
+	rmqPing *messaging.HealthPinger
 }
 
 // newRabbitMQStack builds the Redis buffer, the AMQP connection/channel, the
@@ -60,7 +61,14 @@ func newRabbitMQStack(cfg config.Config, logger *slog.Logger) (*rabbitmqStack, e
 	out := sink.NewRabbitMQ(redisBuf, pub, logger)
 	retry := buffer.NewRetryWorker(redisBuf, pub, cfg.Redis.RetryInterval(), cfg.Redis.RetryMinAge(), logger)
 
-	return &rabbitmqStack{redis: redisBuf, conn: conn, channel: channel, sink: out, retry: retry}, nil
+	return &rabbitmqStack{
+		redis:   redisBuf,
+		conn:    conn,
+		channel: channel,
+		sink:    out,
+		retry:   retry,
+		rmqPing: messaging.NewHealthPinger(conn),
+	}, nil
 }
 
 // close tears down the stack in reverse order.

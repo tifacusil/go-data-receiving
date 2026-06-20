@@ -60,7 +60,7 @@ aparte, no exponer paquetes desde aquí.
 El orden lo dicta la cadena de dependencias: primero lo que no necesita servicios
 externos. Cada hito entrega valor verificable de forma aislada.
 
-**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4–H7 pendientes.
+**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5–H7 pendientes.
 Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
 
 ### H0 — Bootstrap  ·  _infra_  ·  ✅ hecho (`64ead16`)
@@ -115,7 +115,20 @@ Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
   tesis-infra) de los plaintext de `envs/rabbitmq.env`. Creds activas: `admin` /
   `XLrCTo51s4n50qy8GQ`, `data_receiving` / `changeme_data_receiving`.
 
-### H4 — Consul + Health REAL  ·  _Card 2A3 + mejora SE_  ·  ⏭️ siguiente
+### H4 — Consul + Health REAL  ·  _Card 2A3 + mejora SE_  ·  ✅ hecho
+- **Hecho:** `internal/discovery` (registro/deregistro, id `data-receiving-{InstanceId}`,
+  tags `env`/`version:`/`instance:`, check HTTP `/health/` cada 10s, deregister critical
+  1m), `internal/health` (checker + server `net/http`). **Mejora SE aplicada:** el checker
+  verifica TCP listening **+ ping real a Redis + ping activo a RabbitMQ** (abre/cierra un
+  canal); respuesta `{status, checks:{tcp,redis,rabbitmq}}`, 503 si una dependencia cae.
+- **Verificado:** unit (200 sano; 503 con Redis/RabbitMQ/TCP caídos; solo-tcp si pingers
+  nil; handler 200/503); integration vs Consul vivo (registro→catálogo con tags correctos
+  →deregistro); smoke binario: `/health` → `200 {"status":"ok","checks":{rabbitmq,redis,tcp:true}}`,
+  servicio registrado en Consul.
+- **Pendiente deploy (no código):** el check HTTP se registra como `http://localhost:{port}`
+  (1:1 con el C#). Con Consul **en contenedor**, `localhost` resuelve al contenedor, no al
+  host → el check sale `critical`. En Wave 1 (agente Consul en el mismo host) funciona; con
+  Consul dockerizado hay que registrar la IP del host o usar host-network. Se resuelve en H7.
 - **Entregables:** `internal/discovery` (registro/deregistro en Consul: name
   `data-receiving`, id `data-receiving-{InstanceId}`, tags, check HTTP cada 10s),
   `internal/health`. **Mejora obligatoria (CLAUDE.md §1.6/§4):** el checker verifica TCP

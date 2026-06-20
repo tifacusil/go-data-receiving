@@ -17,6 +17,8 @@ import (
 
 	"github.com/AngelloFD/go-data-receiving/internal/config"
 	"github.com/AngelloFD/go-data-receiving/internal/deadletter"
+	"github.com/AngelloFD/go-data-receiving/internal/discovery"
+	"github.com/AngelloFD/go-data-receiving/internal/health"
 	"github.com/AngelloFD/go-data-receiving/internal/parsing"
 	"github.com/AngelloFD/go-data-receiving/internal/schema"
 	"github.com/AngelloFD/go-data-receiving/internal/sink"
@@ -47,9 +49,11 @@ func Run(ctx context.Context, version string) error {
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
+	status := tcp.NewStatus()
 
-	// In rabbitmq mode the sink is backed by Redis + RabbitMQ and a RetryWorker
-	// runs alongside the TCP server. Other modes use a local sink only.
+	// In rabbitmq mode the sink is backed by Redis + RabbitMQ and the
+	// RetryWorker, health endpoint and Consul registration run alongside the TCP
+	// server. Other modes use a local sink only and skip those workers.
 	var out sink.Sink
 	if cfg.OutputMode == "rabbitmq" {
 		rmq, err := newRabbitMQStack(cfg, logger)
@@ -59,7 +63,17 @@ func Run(ctx context.Context, version string) error {
 		defer rmq.close(logger)
 		out = rmq.sink
 		g.Go(func() error { return rmq.retry.Run(ctx) })
-		// TODO(H4): start the health endpoint and register in Consul.
+
+		// Health check verifies the TCP listener AND pings Redis + RabbitMQ.
+		checker := health.NewChecker(status, rmq.redis, rmq.rmqPing)
+		healthSrv := health.NewServer(cfg.Consul.HealthPort, checker, logger)
+		g.Go(func() error { return healthSrv.Run(ctx) })
+
+		reg, err := discovery.New(cfg.Consul, logger)
+		if err != nil {
+			return err
+		}
+		g.Go(func() error { return reg.Run(ctx) })
 	} else {
 		out, err = buildLocalSink(cfg)
 		if err != nil {
@@ -67,7 +81,6 @@ func Run(ctx context.Context, version string) error {
 		}
 	}
 
-	status := tcp.NewStatus()
 	server := tcp.NewServer(cfg.Port, parser, out, dlx, status, logger)
 	g.Go(func() error { return server.Run(ctx) })
 
