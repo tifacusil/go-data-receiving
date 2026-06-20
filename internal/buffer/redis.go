@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -130,11 +131,11 @@ func (r *Redis) Count(ctx context.Context) (int64, error) {
 func parseConnString(s string) (*redis.Options, error) {
 	opt := &redis.Options{}
 	first := true
-	for _, part := range splitComma(s) {
+	for _, part := range strings.Split(s, ",") {
 		if part == "" {
 			continue
 		}
-		if k, v, ok := splitKV(part); ok {
+		if k, v, ok := strings.Cut(part, "="); ok {
 			switch k {
 			case "password":
 				opt.Password = v
@@ -154,25 +155,4 @@ func parseConnString(s string) (*redis.Options, error) {
 		return nil, fmt.Errorf("redis connection string %q has no host:port", s)
 	}
 	return opt, nil
-}
-
-func splitComma(s string) []string {
-	var parts []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == ',' {
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	return append(parts, s[start:])
-}
-
-func splitKV(s string) (key, val string, ok bool) {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '=' {
-			return s[:i], s[i+1:], true
-		}
-	}
-	return "", "", false
 }

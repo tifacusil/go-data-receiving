@@ -6,11 +6,13 @@ package tcp
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,14 +205,8 @@ func (s *Server) writeAck(ctx context.Context, conn net.Conn, status, code byte)
 }
 
 func hexPreview(frame []byte) string {
-	n := len(frame)
-	if n > 16 {
-		n = 16
+	if len(frame) > 16 {
+		frame = frame[:16]
 	}
-	const digits = "0123456789ABCDEF"
-	out := make([]byte, 0, n*2)
-	for _, b := range frame[:n] {
-		out = append(out, digits[b>>4], digits[b&0x0F])
-	}
-	return string(out)
+	return strings.ToUpper(hex.EncodeToString(frame))
 }

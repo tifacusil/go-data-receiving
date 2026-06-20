@@ -4,7 +4,6 @@ go 1.23.0
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1
-	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api v1.29.4
 	github.com/pact-foundation/pact-go/v2 v2.0.10
 	github.com/prometheus/client_golang v1.23.2

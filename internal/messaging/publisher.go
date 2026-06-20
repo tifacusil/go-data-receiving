@@ -13,16 +13,11 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// Publisher sends envelopes to the broker. Port of the C# IMessagePublisher.
-type Publisher interface {
-	// PublishJSON publishes a serialized envelope under routingKey and blocks
-	// until the broker confirms or the confirm timeout elapses.
-	PublishJSON(ctx context.Context, routingKey, envelopeJSON, messageID string) error
-}
-
-// RabbitMQ is a confirm-mode Publisher over a single AMQP channel. The channel
-// is not concurrency-safe, so publishes are serialized with a mutex (matching
-// the C# lock).
+// RabbitMQ publishes envelopes to the broker with publisher confirms (port of
+// the C# IMessagePublisher / RabbitMqPublisher). Consumers depend on it through
+// their own small interfaces (sink.publisher, buffer.Republisher), so no shared
+// Publisher interface is declared here. The channel is not concurrency-safe, so
+// publishes are serialized with a mutex (matching the C# lock).
 type RabbitMQ struct {
 	channel        *amqp.Channel
 	exchange       string

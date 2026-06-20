@@ -4,6 +4,7 @@ package deadletter
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/AngelloFD/go-data-receiving/internal/parsing"
-	"github.com/google/uuid"
 )
 
 // entry is the JSON record written per rejected frame. Field order and
@@ -41,8 +41,16 @@ func NewWriter(dir string) (*Writer, error) {
 	return &Writer{
 		dir: dir,
 		now: time.Now,
-		id:  func() string { return strings.ReplaceAll(uuid.NewString(), "-", "") },
+		id:  randomHexID,
 	}, nil
+}
+
+// randomHexID returns 16 random bytes as 32 hex chars, used to keep DLX
+// filenames unique when two frames land in the same millisecond.
+func randomHexID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error on supported platforms
+	return hex.EncodeToString(b[:])
 }
 
 // Write serializes the rejected frame and its parse error to a new JSON file.
