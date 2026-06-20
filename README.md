@@ -114,7 +114,8 @@ usando los mismos valores `RECEIVER__*` que el env compartido de tesis-infra:
 ```bash
 docker build -f Dockerfile -t go-data-receiving:local .
 
-docker run --rm --name data-receiving-local \
+docker run -d --name data-receiving-local \
+  --restart unless-stopped \
   --network landslide-net \
   -p 5000:5000 -p 8080:8080 \
   -e RECEIVER__OUTPUTMODE=rabbitmq \
@@ -129,6 +130,16 @@ docker run --rm --name data-receiving-local \
   -e RECEIVER__CONSUL__HEALTHPORT=8080 \
   -e RECEIVER__CONSUL__HEALTHCHECKHOST=data-receiving-local \
   go-data-receiving:local
+```
+
+Corre detached (`-d`) y persiste (`--restart unless-stopped`); no se borra al parar.
+Gestionarlo:
+
+```bash
+docker logs -f data-receiving-local   # ver logs
+docker stop data-receiving-local      # parar (no lo borra)
+docker start data-receiving-local     # volver a arrancar
+docker rm -f data-receiving-local     # eliminar cuando ya no se necesite
 ```
 
 `HEALTHCHECKHOST` debe ser el hostname/nombre del contenedor (no `localhost`): Consul corre
