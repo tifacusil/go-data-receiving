@@ -1,115 +1,116 @@
 # go-data-receiving
 
-Reescritura en Go del microservicio `data-receiving` del sistema de monitoreo de
-deslizamientos (Bai et al. 2020). Recibe frames binarios DTU por TCP, los valida y
-parsea, y publica envelopes JSON a RabbitMQ con Redis como buffer de durabilidad y
-Consul para service discovery.
+Go rewrite of the `data-receiving` microservice from the landslide monitoring
+system (Bai et al. 2020). Receives binary DTU frames over TCP, validates and
+parses them, and publishes JSON envelopes to RabbitMQ with Redis as a durability
+buffer and Consul for service discovery.
 
-Baseline de referencia: `data-receiving-module-csharp` (C#/.NET 8).
-Guía de ingeniería: [`CLAUDE.md`](./CLAUDE.md). Plan de hitos: [`ROADMAP.md`](./ROADMAP.md).
+Reference baseline: `data-receiving-module-csharp` (C#/.NET 8).
+Engineering guide: [`CLAUDE.md`](./CLAUDE.md). Milestone plan: [`ROADMAP.md`](./ROADMAP.md).
 
-## Estado
+## Status
 
-Reescritura completa (H0–H7). El servicio replica el comportamiento *observable* del
-baseline C# (protocolo de frame, CRC, serialización byte-igual, ACK, flujo
-Redis→RabbitMQ) para que la comparación de rendimiento Go vs C# sea justa, y añade como
-capa no intrusiva las prácticas SE que el baseline no tenía (health real, métricas,
-tracing, CDCT). Ver [Prácticas de ingeniería](#prácticas-de-ingeniería-aplicadas).
+Full rewrite (H0–H7). The service replicates the *observable* behaviour of the C#
+baseline (frame protocol, CRC, byte-identical serialization, ACK, Redis→RabbitMQ
+flow) so the Go vs C# performance comparison stays fair, and adds — as a
+non-intrusive layer — the SE practices the baseline lacked (real health checks,
+metrics, tracing, CDCT). See [Engineering practices](#engineering-practices-applied).
 
-## Arquitectura
+## Architecture
 
 ```
 DTU sensor (TCP)
    │
-   ▼  internal/tcp        framereader length-prefixed, ACK, accept loop
+   ▼  internal/tcp        length-prefixed framereader, ACK, accept loop
    ▼  internal/parsing    CRC-16 → frame → header → payload → serializer
-   ▼  internal/schema     validación JSON Schema 2020-12 (embebido)
-   ▼  internal/sink        ┌─ stdout / file / null      (modos locales)
+   ▼  internal/schema     JSON Schema 2020-12 validation (embedded)
+   ▼  internal/sink        ┌─ stdout / file / null      (local modes)
                            └─ rabbitmq:
-                                 internal/buffer     Set en Redis  (sensor_buffer:{id})
-                                 internal/messaging  Publish con confirms → sensors.raw
-                                 internal/buffer     Delete tras confirmar (+ RetryWorker)
-   ▼  internal/deadletter  frames inválidos → JSON en disco (nunca bloquean)
+                                 internal/buffer     Set in Redis  (sensor_buffer:{id})
+                                 internal/messaging  Publish with confirms → sensors.raw
+                                 internal/buffer     Delete after confirm (+ RetryWorker)
+   ▼  internal/deadletter  invalid frames → JSON on disk (never block)
 
-Side workers (modo rabbitmq):
-   internal/health     /health (TCP+Redis+RabbitMQ) y /metrics
-   internal/discovery  registro/deregistro en Consul
+Side workers (rabbitmq mode):
+   internal/health     /health (TCP+Redis+RabbitMQ) and /metrics
+   internal/discovery  register/deregister in Consul
 ```
 
-`internal/app` es el composition root que cablea todo; `cmd/data-receiving/main.go` solo
-maneja señales y delega.
+`internal/app` is the composition root that wires everything; `cmd/data-receiving/main.go`
+only handles signals and delegates.
 
-## Desarrollo local
+## Local development
 
-Requiere Go 1.23+.
+Requires Go 1.23+.
 
 ```bash
-make build          # compila a ./bin/data-receiving
-make run            # ejecuta en modo stdout (sin servicios externos)
-make test           # unit + contract tests (sin Docker, -race)
+make build          # builds ./bin/data-receiving
+make run            # runs in stdout mode (no external services)
+make test           # unit + contract tests (no Docker, -race)
 make lint           # golangci-lint v2
-make test-integration   # integration vs infra viva (redis/rabbitmq/consul)
-make test-pact          # CDCT message pact (requiere lib FFI de pact)
-go run ./cmd/data-receiving version   # imprime la versión (sha en imagen)
+make test-integration   # integration vs live infra (redis/rabbitmq/consul)
+make test-pact          # CDCT message pact (requires the pact FFI lib)
+go run ./cmd/data-receiving version   # prints the version (sha in the image)
 ```
 
-## Configuración
+## Configuration
 
-Toda la configuración se externaliza vía variables de entorno con prefijo `RECEIVER__`
-y `__` como separador de secciones (paridad 1:1 con el baseline C#). Los secretos
-(password de RabbitMQ, token de Consul) **nunca** van en `.env` ni en el repo: viven en
-`/etc/data-receiving/secrets` en los servidores. Claves y defaults: `internal/config/config.go`
-y `.env.example`.
+All configuration is externalized via environment variables with the `RECEIVER__`
+prefix and `__` as the section separator (1:1 parity with the C# baseline).
+Secrets (RabbitMQ password, Consul token) **never** go in `.env` or the repo: they
+live in `/etc/data-receiving/secrets` on servers. Keys and defaults:
+`internal/config/config.go` and `.env.example`.
 
-`OutputMode` (`stdout`|`file`|`null`|`rabbitmq`) decide qué cablea el composition root.
-Los modos locales no construyen Redis/RabbitMQ/Consul/health — útiles para dev y tests
-sin infra.
+`OutputMode` (`stdout`|`file`|`null`|`rabbitmq`) decides what the composition root
+wires. Local modes don't build Redis/RabbitMQ/Consul/health — handy for dev and
+tests without infra.
 
-## Contratos
+## Contracts
 
-`contracts/` es la fuente de verdad (JSON Schema Draft 2020-12 + ejemplos + el documento
-`tarea-0-contratos.md`). El validador embebe una copia bajo `internal/schema/schemas`
-vía `go:embed`; `make sync-schemas` la regenera y `make check-schemas` falla (en CI) si
-divergen.
+`contracts/` is the source of truth (JSON Schema Draft 2020-12 + examples + the
+`tarea-0-contratos.md` document). The validator embeds a copy under
+`internal/schema/schemas` via `go:embed`; `make sync-schemas` regenerates it and
+`make check-schemas` fails (in CI) if they drift.
 
-## Despliegue
+## Deployment
 
-`Dockerfile` (multi-stage, binario estático sobre imagen distroless, ~21 MB) en este repo.
-CI/CD en `.github/workflows/`: CI (lint + build + test) en cada push/PR; CD construye y
-publica la imagen a GHCR (`ghcr.io/tifacusil/go-data-receiving`, tags `latest` + sha) tras
-un CI verde.
+`Dockerfile` (multi-stage, static binary on a distroless image, ~21 MB) in this
+repo. CI/CD in `.github/workflows/`: CI (lint + build + test) on every push/PR; CD
+builds and publishes the image to GHCR (`ghcr.io/tifacusil/go-data-receiving`,
+tags `latest` + sha) after a green CI.
 
-El despliegue real (las 3 instancias) vive en **tesis-infra**:
-`local/services/data-receiving/docker-compose.yml`. Este repo solo aporta la imagen.
+The real deployment (the 3 instances) lives in **tesis-infra**:
+`local/services/data-receiving/docker-compose.yml`. This repo only ships the image.
 
-### Levantar en contenedor local
+### Run in a container locally
 
-Requiere la infra base (Redis, RabbitMQ, Consul) corriendo en la red Docker
-`landslide-net` — la levanta `tesis-infra/local/infra/docker-compose.yml`.
+Requires the base infra (Redis, RabbitMQ, Consul) running on the Docker network
+`landslide-net` — brought up by `tesis-infra/local/infra/docker-compose.yml`.
 
-**Opción A — replicar el despliegue completo (3 instancias)** vía el compose de tesis-infra.
-Construye la imagen con el tag que el compose espera y levántalo:
+**Option A — replicate the full deployment (3 instances)** via the tesis-infra
+compose. Build the image with the tag the compose expects and bring it up:
 
 ```bash
-# 1. desde este repo: construir la imagen con el nombre que usa el compose
+# 1. from this repo: build the image with the name the compose uses
 docker build -f Dockerfile -t ghcr.io/tifacusil/go-data-receiving:latest .
 
-# 2. desde tesis-infra: levantar las 3 instancias
-cd <ruta>/tesis-infra/local/services/data-receiving
+# 2. from tesis-infra: bring up the 3 instances
+cd <path>/tesis-infra/local/services/data-receiving
 docker compose up -d
 docker compose ps
 ```
 
-Quedan en `5000/5001/5002` (TCP) y `8080/8081/8082` (HTTP). Verificar:
+They land on `5000/5001/5002` (TCP) and `8080/8081/8082` (HTTP). Verify:
 
 ```bash
 curl http://localhost:8080/health/   # {"status":"ok","checks":{"tcp":true,"redis":true,"rabbitmq":true}}
-curl http://localhost:8080/metrics   # exposición Prometheus
-curl http://localhost:8500/v1/health/service/data-receiving   # 3 instancias en Consul
+curl http://localhost:8080/metrics   # Prometheus exposition
+curl http://localhost:8500/v1/health/service/data-receiving   # 3 instances in Consul
 ```
 
-**Opción B — una sola instancia** sin compose (prueba rápida), unida a `landslide-net` y
-usando los mismos valores `RECEIVER__*` que el env compartido de tesis-infra:
+**Option B — a single instance** without compose (quick check), joined to
+`landslide-net` and using the same `RECEIVER__*` values as the shared tesis-infra
+env:
 
 ```bash
 docker build -f Dockerfile -t go-data-receiving:local .
@@ -132,146 +133,145 @@ docker run -d --name data-receiving-local \
   go-data-receiving:local
 ```
 
-Corre detached (`-d`) y persiste (`--restart unless-stopped`); no se borra al parar.
-Gestionarlo:
+Runs detached (`-d`) and persists (`--restart unless-stopped`); it isn't removed
+on stop. Manage it:
 
 ```bash
-docker logs -f data-receiving-local   # ver logs
-docker stop data-receiving-local      # parar (no lo borra)
-docker start data-receiving-local     # volver a arrancar
-docker rm -f data-receiving-local     # eliminar cuando ya no se necesite
+docker logs -f data-receiving-local   # view logs
+docker stop data-receiving-local      # stop (does not remove it)
+docker start data-receiving-local     # start again
+docker rm -f data-receiving-local     # remove when no longer needed
 ```
 
-`HEALTHCHECKHOST` debe ser el hostname/nombre del contenedor (no `localhost`): Consul corre
-en otro contenedor y alcanza `/health` por ese nombre dentro de `landslide-net`.
+`HEALTHCHECKHOST` must be the container hostname/name (not `localhost`): Consul runs
+in another container and reaches `/health` by that name within `landslide-net`.
 
 ---
 
-## Prácticas de ingeniería aplicadas
+## Engineering practices applied
 
-Las prácticas siguen el catálogo del [`CLAUDE.md`](./CLAUDE.md) (sustentado en El Fellah
+The practices follow the catalogue in [`CLAUDE.md`](./CLAUDE.md) (backed by El Fellah
 et al. 2026, Schwarz et al. 2025, Saleh Sedghpour et al. 2022, Taibi & Lenarduzzi 2018).
-Cada una se lista con **dónde** está en el código y **por qué** se aplicó.
+Each is listed with **where** it lives in the code and **why** it was applied.
 
-### Diseño de microservicios
+### Microservice design
 
-- **Contract-first.** `contracts/schemas/*.schema.json` (JSON Schema 2020-12) definen el
-  envelope y los 5 payloads *antes* que cualquier handler. El productor valida contra
-  ellos en `internal/schema/validator.go` antes de publicar. *Por qué:* un mensaje que no
-  cumple el contrato nunca llega a `sensors.raw`; los consumidores (Data Management, Early
-  Warning) dependen de una forma estable.
+- **Contract-first.** `contracts/schemas/*.schema.json` (JSON Schema 2020-12) define the
+  envelope and the 5 payloads *before* any handler. The producer validates against them
+  in `internal/schema/validator.go` before publishing. *Why:* a message that doesn't meet
+  the contract never reaches `sensors.raw`; the consumers (Data Management, Early Warning)
+  depend on a stable shape.
 
-- **Database/buffer-per-service.** El servicio solo toca su propio Redis con el prefijo
-  `sensor_buffer:` (`internal/buffer/redis.go`). No lee tablas de otros servicios. *Por
-  qué:* evita el bad smell de *Shared Persistency* (Taibi & Lenarduzzi 2018); cada
-  servicio dueño de sus datos.
+- **Database/buffer-per-service.** The service only touches its own Redis with the
+  `sensor_buffer:` prefix (`internal/buffer/redis.go`). It reads no other service's tables.
+  *Why:* avoids the *Shared Persistency* bad smell (Taibi & Lenarduzzi 2018); each service
+  owns its data.
 
-- **Idempotencia / clave de deduplicación.** `message_id` (UUID) viaja en el envelope, es
-  la key del buffer Redis y la `MessageId` de la propiedad AMQP
-  (`internal/messaging/publisher.go`). *Por qué:* permite a los consumidores deduplicar
-  bajo entrega *at-least-once*; nunca se asume *exactly-once*.
+- **Idempotency / deduplication key.** `message_id` (UUID) travels in the envelope, is the
+  Redis buffer key, and is the `MessageId` AMQP property
+  (`internal/messaging/publisher.go`). *Why:* lets consumers deduplicate under
+  *at-least-once* delivery; *exactly-once* is never assumed.
 
-- **Versionado de contrato.** `schema_version` fijo `"1.0"` en el envelope, patrón semver
-  en el schema. *Por qué:* cambios futuros siguen la regla aditivo→minor / incompatible→major.
+- **Contract versioning.** `schema_version` fixed at `"1.0"` in the envelope, semver
+  pattern in the schema. *Why:* future changes follow the additive→minor /
+  incompatible→major rule.
 
-### Resiliencia y durabilidad
+### Resilience and durability
 
-- **Outbox / buffer de durabilidad (Set→Publish→Delete).** `internal/sink/rabbitmq.go`
-  escribe a Redis *antes* de publicar y borra solo tras la confirmación del broker; si el
-  publish falla, la entrada queda en Redis y `Write` devuelve `nil` (ACK de éxito al
-  sensor). *Por qué:* ningún frame parseado se pierde aunque RabbitMQ esté caído.
+- **Outbox / durability buffer (Set→Publish→Delete).** `internal/sink/rabbitmq.go` writes
+  to Redis *before* publishing and deletes only after the broker confirms; if the publish
+  fails, the entry stays in Redis and `Write` returns `nil` (success ACK to the sensor).
+  *Why:* no parsed frame is lost even when RabbitMQ is down.
 
-- **Publisher Confirms.** `internal/messaging/publisher.go` espera el ack del broker con
-  timeout antes de considerar publicado un mensaje. *Por qué:* sin confirms, "publicar" no
-  garantiza que el broker lo aceptó.
+- **Publisher Confirms.** `internal/messaging/publisher.go` waits for the broker ack with a
+  timeout before considering a message published. *Why:* without confirms, "publishing"
+  doesn't guarantee the broker accepted it.
 
-- **Retry acotado + Dead Letter local.** `internal/buffer/retry_worker.go` reescanea Redis
-  y republica las entradas atascadas; los frames inválidos van a un dead-letter en disco
-  (`internal/deadletter/local.go`) y nunca bloquean el pipeline. *Por qué:* recuperación
-  automática tras caídas + inspección de frames rechazados.
-  *(El intervalo de retry es fijo 30s, 1:1 con el baseline; el backoff exponencial queda
-  marcado con `// TODO(SE-practice):` para no romper la comparabilidad del experimento.)*
+- **Bounded retry + local Dead Letter.** `internal/buffer/retry_worker.go` rescans Redis and
+  republishes stuck entries; invalid frames go to an on-disk dead-letter
+  (`internal/deadletter/local.go`) and never block the pipeline. *Why:* automatic recovery
+  after outages + inspection of rejected frames.
+  *(The retry interval is a fixed 30s, 1:1 with the baseline; exponential backoff is marked
+  with `// TODO(SE-practice):` to keep the experiment comparable.)*
 
-- **Health checks reales.** `internal/health/checker.go` verifica que el listener TCP esté
-  arriba **y** hace ping real a Redis y a RabbitMQ; responde `503` si una dependencia
-  crítica cae. *Por qué:* un `/health` que solo devuelve `200` estático miente; Consul debe
-  sacar de rotación una instancia con dependencias rotas.
+- **Real health checks.** `internal/health/checker.go` verifies the TCP listener is up **and**
+  actively pings Redis and RabbitMQ; returns `503` if a critical dependency is down. *Why:*
+  a `/health` that just returns a static `200` lies; Consul must pull an instance with
+  broken dependencies out of rotation.
 
-- **Service discovery con auto-deregistro.** `internal/discovery/consul.go` registra el
-  servicio con un health check HTTP y lo deregistra en el shutdown (`Run` bloquea en `ctx`
-  y limpia en el defer). *Por qué:* el balanceador solo enruta a instancias vivas; el
-  graceful shutdown evita 0 frame-loss al rotar instancias.
+- **Service discovery with auto-deregister.** `internal/discovery/consul.go` registers the
+  service with an HTTP health check and deregisters it on shutdown (`Run` blocks on `ctx`
+  and cleans up in the defer). *Why:* the load balancer only routes to live instances;
+  graceful shutdown yields 0 frame-loss when rotating instances.
 
-### 12-factor / operación
+### 12-factor / operation
 
-- **Configuración externalizada.** `internal/config/config.go` mapea todo desde env
-  (`RECEIVER__*`); cero hosts/puertos/credenciales hardcodeados. Secretos fuera del repo.
-  *Por qué:* mismo binario en dev/staging/prod cambiando solo el entorno.
+- **Externalized configuration.** `internal/config/config.go` maps everything from env
+  (`RECEIVER__*`); zero hardcoded hosts/ports/credentials. Secrets outside the repo. *Why:*
+  the same binary in dev/staging/prod by only changing the environment.
 
-- **Logging estructurado (JSON) con correlación.** `internal/observability/logging.go`
-  (slog JSON) añade `service`/`instance_id`/`version` a cada línea; los logs por frame
-  llevan `message_id`. *Por qué:* seguir un mensaje a través de TCP → RabbitMQ →
-  consumidores.
+- **Structured logging (JSON) with correlation.** `internal/observability/logging.go`
+  (slog JSON) adds `service`/`instance_id`/`version` to every line; per-frame logs carry
+  `message_id`. *Why:* follow a message across TCP → RabbitMQ → consumers.
 
-- **Métricas Prometheus.** `internal/observability/metrics.go`: `frames_total{result,
-  sensor_type}`, histograma de latencia (p50/p90/p95/p99), publicados/descartados, CPU y
-  memoria residente del proceso; servidas en `/metrics`. *Por qué:* el objetivo del
-  proyecto es comparar empíricamente throughput/latencia/CPU/memoria Go vs C#.
+- **Prometheus metrics.** `internal/observability/metrics.go`: `frames_total{result,
+  sensor_type}`, latency histogram (p50/p90/p95/p99), published/dropped, process CPU and
+  resident memory; served on `/metrics`. *Why:* the project's goal is to empirically compare
+  throughput/latency/CPU/memory Go vs C#.
 
-- **Distributed tracing.** `internal/observability/tracing.go` abre un span por frame
-  correlado por `message_id` (no-op sin exporter configurado). *Por qué:* trazar el flujo
-  end-to-end cuando haya colector.
+- **Distributed tracing.** `internal/observability/tracing.go` opens a span per frame
+  correlated by `message_id` (no-op without a configured exporter). *Why:* trace the
+  end-to-end flow once a collector is available.
 
-- **Observabilidad no intrusiva.** La instrumentación se inyecta vía
-  `tcp.Server.WithObservability` y es nil-safe. *Por qué:* medir sin alterar el flujo
-  byte-a-byte que la comparación de rendimiento necesita intacto.
+- **Non-intrusive observability.** Instrumentation is injected via
+  `tcp.Server.WithObservability` and is nil-safe. *Why:* measure without altering the
+  byte-for-byte flow the performance comparison needs intact.
 
-### Arquitectura del código
+### Code architecture
 
-- **Composition root + inyección por constructor (sin framework DI).** `internal/app/`
-  arma las dependencias y las corre como goroutines bajo un `errgroup` con `context`
-  cancelable; `cmd/data-receiving/main.go` solo monta `signal.NotifyContext` y delega.
-  *Por qué:* equivalente idiomático Go del host con `BackgroundService` de .NET, sin magia.
+- **Composition root + constructor injection (no DI framework).** `internal/app/` assembles
+  the dependencies and runs them as goroutines under an `errgroup` with a cancellable
+  `context`; `cmd/data-receiving/main.go` only sets up `signal.NotifyContext` and delegates.
+  *Why:* the idiomatic Go equivalent of .NET's host with `BackgroundService`, no magic.
 
-- **Graceful shutdown.** SIGINT/SIGTERM cancelan el `context` → el `errgroup` propaga → cada
-  worker cierra en su `defer` (incl. deregistro de Consul). *Por qué:* terminar limpio sin
-  perder mensajes en vuelo.
+- **Graceful shutdown.** SIGINT/SIGTERM cancel the `context` → the `errgroup` propagates →
+  each worker closes in its `defer` (incl. Consul deregistration). *Why:* terminate cleanly
+  without losing in-flight messages.
 
-- **Puertos y adaptadores (interfaces pequeñas, definidas del lado del consumidor).**
-  `sink.Sink`, `buffer.Buffer`, `messaging.Publisher`, `parsing.SchemaValidator`,
-  `tcp.Observer`/`tcp.Tracer`. *Por qué:* desacopla el dominio de la infraestructura y hace
-  triviales los fakes en tests.
+- **Ports and adapters (small interfaces, defined on the consumer side).** `sink.Sink`,
+  `buffer.Buffer`, `messaging.Publisher`, `parsing.SchemaValidator`, `tcp.Observer`/
+  `tcp.Tracer`. *Why:* decouples the domain from infrastructure and makes test fakes trivial.
 
-- **`internal/` para encapsular.** Todo el dominio vive en `internal/` (el compilador
-  prohíbe importarlo desde fuera del módulo); no se usa `pkg/`. *Por qué:* es un
-  microservicio, no una librería; nada debe ser importado por terceros.
+- **`internal/` for encapsulation.** All the domain lives in `internal/` (the compiler
+  forbids importing it from outside the module); `pkg/` is not used. *Why:* it's a
+  microservice, not a library; nothing should be imported by third parties.
 
-- **Núcleo puro sin I/O.** El parser (`internal/parsing`) opera sobre `[]byte` sin sockets
-  ni servicios. *Por qué:* testeable con arrays de bytes hardcodeados, rápido, determinista.
+- **Pure I/O-free core.** The parser (`internal/parsing`) operates on `[]byte` with no
+  sockets or services. *Why:* testable with hardcoded byte arrays, fast, deterministic.
 
-### Calidad y CI/CD (pirámide de tests)
+### Quality and CI/CD (test pyramid)
 
-- **Unit tests** — lógica aislada con mocks/fakes (CRC, decoders, ACK, sink con buffer
-  falso, etc.).
-- **Golden test de serialización** (`internal/parsing/serializer_test.go`) — fija los bytes
-  JSON exactos, byte-igual al C# (incluido el drop de ceros: `15.0`→`15`, `2.10`→`2.1`).
-  *Por qué:* la paridad de salida es el contrato medible del experimento.
-- **Contract tests** (`internal/schema/validator_test.go`) — los ejemplos de `contracts/`
-  validan contra los schemas embebidos.
-- **Integration tests** (`test/integration/`, build tag `integration`) — Redis + RabbitMQ +
-  Consul reales: publish→cola + buffer vacío, broker caído→persiste→RetryWorker reenvía,
-  registro/deregistro en Consul.
-- **CDCT con pact-go** (`test/pact/`, build tag `pact`) — message pact AMQP: el consumidor
-  `data-management` define lo que espera y el handler valida el body contra *nuestro*
-  schema. *Por qué:* detecta divergencias productor-consumidor sin levantar todo el sistema
+- **Unit tests** — isolated logic with mocks/fakes (CRC, decoders, ACK, sink with a fake
+  buffer, etc.).
+- **Serialization golden test** (`internal/parsing/serializer_test.go`) — pins the exact
+  JSON bytes, byte-identical to C# (including zero dropping: `15.0`→`15`, `2.10`→`2.1`).
+  *Why:* output parity is the experiment's measurable contract.
+- **Contract tests** (`internal/schema/validator_test.go`) — the `contracts/` examples
+  validate against the embedded schemas.
+- **Integration tests** (`test/integration/`, build tag `integration`) — real Redis +
+  RabbitMQ + Consul: publish→queue + empty buffer, broker down→persists→RetryWorker
+  republishes, register/deregister in Consul.
+- **CDCT with pact-go** (`test/pact/`, build tag `pact`) — AMQP message pact: the consumer
+  `data-management` defines what it expects and the handler validates the body against *our*
+  schema. *Why:* detects producer-consumer divergence without standing up the whole system
   (Schwarz et al. 2025).
-- **CI/CD** (`.github/workflows/`) — CI: tidy + drift de schemas + lint + build + `go test
-  -race`. CD: build de imagen → push a GHCR tras CI verde. *Por qué:* cada cambio pasa por
-  el mismo gate; las imágenes salen versionadas por commit.
-- **Imagen mínima** (`Dockerfile`) — binario estático `CGO_ENABLED=0` sobre distroless
-  static nonroot (~21 MB). *Por qué:* menor superficie de ataque y arranque rápido; los
-  schemas van embebidos, sin archivos extra en runtime.
+- **CI/CD** (`.github/workflows/`) — CI: tidy + schema drift + lint + build + `go test
+  -race`. CD: build image → push to GHCR after a green CI. *Why:* every change goes through
+  the same gate; images come out versioned by commit.
+- **Minimal image** (`Dockerfile`) — static `CGO_ENABLED=0` binary on distroless static
+  nonroot (~21 MB). *Why:* smaller attack surface and fast startup; the schemas are embedded,
+  no extra files at runtime.
 
 
-Lo demás (protocolo, CRC, serialización, flujo buffer→publish, retry 30s) se mantiene 1:1
-con el baseline a propósito, para que la comparación de rendimiento sea justa.
+Everything else (protocol, CRC, serialization, buffer→publish flow, 30s retry) is kept 1:1
+with the baseline on purpose, so the performance comparison stays fair.
