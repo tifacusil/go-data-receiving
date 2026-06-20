@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 
 	"golang.org/x/sync/errgroup"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/AngelloFD/go-data-receiving/internal/deadletter"
 	"github.com/AngelloFD/go-data-receiving/internal/discovery"
 	"github.com/AngelloFD/go-data-receiving/internal/health"
+	"github.com/AngelloFD/go-data-receiving/internal/observability"
 	"github.com/AngelloFD/go-data-receiving/internal/parsing"
 	"github.com/AngelloFD/go-data-receiving/internal/schema"
 	"github.com/AngelloFD/go-data-receiving/internal/sink"
@@ -33,13 +33,12 @@ func Run(ctx context.Context, version string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With(
-		slog.String("service", "data-receiving"),
-		slog.String("version", version),
-		slog.String("instance_id", cfg.Consul.InstanceID),
-	)
+	logger := observability.NewLogger("data-receiving", cfg.Consul.InstanceID, version)
 	logger.InfoContext(ctx, "starting",
 		slog.String("output_mode", cfg.OutputMode), slog.Int("port", cfg.Port))
+
+	metrics := observability.NewMetrics()
+	tracer := observability.NewTracer()
 
 	parser := parsing.NewParser(schema.New())
 
@@ -65,8 +64,10 @@ func Run(ctx context.Context, version string) error {
 		g.Go(func() error { return rmq.retry.Run(ctx) })
 
 		// Health check verifies the TCP listener AND pings Redis + RabbitMQ.
+		// The same server also exposes Prometheus /metrics.
 		checker := health.NewChecker(status, rmq.redis, rmq.rmqPing)
-		healthSrv := health.NewServer(cfg.Consul.HealthPort, checker, logger)
+		healthSrv := health.NewServer(cfg.Consul.HealthPort, checker, logger).
+			WithMetrics(metrics.Handler())
 		g.Go(func() error { return healthSrv.Run(ctx) })
 
 		reg, err := discovery.New(cfg.Consul, logger)
@@ -81,7 +82,8 @@ func Run(ctx context.Context, version string) error {
 		}
 	}
 
-	server := tcp.NewServer(cfg.Port, parser, out, dlx, status, logger)
+	server := tcp.NewServer(cfg.Port, parser, out, dlx, status, logger).
+		WithObservability(metrics, tracer)
 	g.Go(func() error { return server.Run(ctx) })
 
 	if err := g.Wait(); err != nil && ctx.Err() == nil {

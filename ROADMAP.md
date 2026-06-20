@@ -60,7 +60,7 @@ aparte, no exponer paquetes desde aquí.
 El orden lo dicta la cadena de dependencias: primero lo que no necesita servicios
 externos. Cada hito entrega valor verificable de forma aislada.
 
-**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5–H7 pendientes.
+**Progreso:** H0 ✅ · H1 ✅ · H2 ✅ · H3 ✅ · H4 ✅ · H5 ✅ · H6–H7 pendientes.
 Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
 
 ### H0 — Bootstrap  ·  _infra_  ·  ✅ hecho (`64ead16`)
@@ -139,7 +139,26 @@ Toolchain: Go 1.23 (directiva fijada; `go get` que la subía se revirtió).
   `ConsulIntegrationTests.cs` / `HealthEndpointHttpTests.cs`): registro/deregistro vía
   API, `/health` real, servicio `passing` en Consul.
 
-### H5 — Observabilidad  ·  _EXTRA CLAUDE.md §5_
+### H5 — Observabilidad  ·  _EXTRA CLAUDE.md §5_  ·  ✅ hecho
+- **Hecho:** `internal/observability` con métricas Prometheus (registry privado),
+  logging `slog` JSON centralizado y tracing OTel (span por frame, no-op sin exporter).
+  Métricas: `data_receiving_frames_total{result,sensor_type}`, histograma de latencia
+  `data_receiving_frame_processing_seconds` (buckets para p50/p90/p95/p99),
+  `messages_published_total` / `messages_dropped_total`, más `process_resident_memory_bytes`
+  / `process_cpu_seconds_total` (process+Go collectors). `/metrics` servido en el mismo
+  puerto del health (`health.Server.WithMetrics`). Instrumentación **no intrusiva** en el
+  TCP server vía `WithObservability` (mide latencia, cuenta ok/rejected, abre span);
+  pingers/metrics/tracer opcionales (nil-safe), no alteran el flujo medible.
+- **Verificado:** unit (counters incrementan; `/metrics` expone frames/latency/published/
+  dropped + runtime CPU/mem; ruta `/metrics` servida por `Run()` en puerto real); smoke
+  binario: tras 1 frame válido + 1 CRC malo → `frames_total{ok,gnss}=1`,
+  `{rejected,unknown}=1`, `published=1`, `dropped=1`, histograma count=2, process CPU/mem
+  presentes.
+- **Nota:** `/metrics` solo se expone en modo rabbitmq (donde corre el health server). En
+  modos locales (stdout/file/null) las métricas se recolectan pero no se exponen — dev.
+  El exporter OTLP real (tracing a un colector) se difiere a H7/config.
+
+#### H5 (entregables originales)
 - **Entregables:** `internal/observability`: logging `slog` JSON
   (`timestamp,level,service,instance_id,message_id/trace_id,event`); Prometheus
   `/metrics` (`process_resident_memory_bytes`, `process_cpu_seconds_total`, throughput

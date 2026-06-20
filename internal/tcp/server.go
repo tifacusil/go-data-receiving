@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/AngelloFD/go-data-receiving/internal/parsing"
 )
@@ -31,14 +32,29 @@ type DeadLetter interface {
 	Write(ctx context.Context, rawFrame []byte, perr *parsing.ParseError) error
 }
 
+// Observer records per-frame metrics. Satisfied by *observability.Metrics. It is
+// optional (nil = no metrics) so the server stays usable without observability.
+type Observer interface {
+	ObserveFrame(result, sensorType string, seconds float64)
+	IncPublished()
+	IncDropped()
+}
+
+// Tracer opens a span per frame. Satisfied by *observability.Tracer. Optional.
+type Tracer interface {
+	StartFrame(ctx context.Context, sensorType, messageID string) (context.Context, func())
+}
+
 // Server listens for DTU connections and dispatches frames.
 type Server struct {
-	port   int
-	parser Parser
-	sink   Sink
-	dlx    DeadLetter
-	status *Status
-	logger *slog.Logger
+	port    int
+	parser  Parser
+	sink    Sink
+	dlx     DeadLetter
+	status  *Status
+	logger  *slog.Logger
+	metrics Observer
+	tracer  Tracer
 }
 
 // NewServer wires a Server. status may be nil (no health endpoint yet).
@@ -47,6 +63,13 @@ func NewServer(port int, parser Parser, sink Sink, dlx DeadLetter, status *Statu
 		logger = slog.Default()
 	}
 	return &Server{port: port, parser: parser, sink: sink, dlx: dlx, status: status, logger: logger}
+}
+
+// WithObservability attaches optional metrics and tracing. Either may be nil.
+func (s *Server) WithObservability(m Observer, t Tracer) *Server {
+	s.metrics = m
+	s.tracer = t
+	return s
 }
 
 // Run binds the listener and serves until ctx is cancelled. It blocks; run it in
@@ -117,14 +140,23 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
+		start := time.Now()
 		result := s.parser.Parse(frame)
 		if result.Success && result.Envelope != nil {
-			if err := s.sink.Write(ctx, result.Envelope); err != nil {
+			env := result.Envelope
+			frameCtx, endSpan := s.startSpan(ctx, env.SensorType, env.MessageID)
+			err := s.sink.Write(frameCtx, env)
+			endSpan()
+			if err != nil {
 				s.logger.ErrorContext(ctx, "sink write failed", slog.Any("error", err),
-					slog.String("message_id", result.Envelope.MessageID))
+					slog.String("message_id", env.MessageID))
 				// Mirror C#: an ACK is still sent below only on success path; a
 				// sink failure aborts this frame without a success ACK.
 				return
+			}
+			s.observe("ok", env.SensorType, start)
+			if s.metrics != nil {
+				s.metrics.IncPublished()
 			}
 			s.writeAck(ctx, conn, 0x00, 0x00)
 			continue
@@ -139,9 +171,29 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			if err := s.dlx.Write(ctx, frame, perr); err != nil {
 				s.logger.ErrorContext(ctx, "dlx write failed", slog.Any("error", err))
 			}
+			s.observe("rejected", "unknown", start)
+			if s.metrics != nil {
+				s.metrics.IncDropped()
+			}
 			s.writeAck(ctx, conn, ackStatus(perr.Stage), byte(perr.Stage))
 		}
 	}
+}
+
+// observe records frame latency + result. No-op when metrics are not attached.
+func (s *Server) observe(result, sensorType string, start time.Time) {
+	if s.metrics != nil {
+		s.metrics.ObserveFrame(result, sensorType, time.Since(start).Seconds())
+	}
+}
+
+// startSpan opens a tracing span when a tracer is attached, else returns ctx
+// unchanged with a no-op end func.
+func (s *Server) startSpan(ctx context.Context, sensorType, messageID string) (context.Context, func()) {
+	if s.tracer == nil {
+		return ctx, func() {}
+	}
+	return s.tracer.StartFrame(ctx, sensorType, messageID)
 }
 
 func (s *Server) writeAck(ctx context.Context, conn net.Conn, status, code byte) {

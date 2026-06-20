@@ -9,11 +9,13 @@ import (
 	"time"
 )
 
-// Server runs the embedded /health HTTP endpoint that Consul polls. Port of the
-// C# HealthEndpoint BackgroundService, using net/http instead of HttpListener.
+// Server runs the embedded /health HTTP endpoint that Consul polls (and, when
+// attached, the Prometheus /metrics endpoint). Port of the C# HealthEndpoint
+// BackgroundService, using net/http instead of HttpListener.
 type Server struct {
 	port    int
 	checker *Checker
+	metrics http.Handler
 	logger  *slog.Logger
 }
 
@@ -25,6 +27,12 @@ func NewServer(port int, checker *Checker, logger *slog.Logger) *Server {
 	return &Server{port: port, checker: checker, logger: logger}
 }
 
+// WithMetrics attaches a Prometheus handler served at /metrics on the same port.
+func (s *Server) WithMetrics(h http.Handler) *Server {
+	s.metrics = h
+	return s
+}
+
 // Run serves /health/ until ctx is cancelled. It blocks; run it in a goroutine
 // from the composition root.
 func (s *Server) Run(ctx context.Context) error {
@@ -33,6 +41,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// bare probe both work (the C# listener used the /health/ prefix).
 	mux.HandleFunc("/health/", s.handle)
 	mux.HandleFunc("/health", s.handle)
+	if s.metrics != nil {
+		mux.Handle("/metrics", s.metrics)
+	}
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),
