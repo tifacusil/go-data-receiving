@@ -74,10 +74,65 @@ divergen.
 
 ## Despliegue
 
-`Dockerfile` (multi-stage, binario estático en imagen distroless) en este repo. El
-`docker-compose.yml` de despliegue y el `prometheus.yml` viven en el repo **tesis-infra**.
-CI/CD en `.github/workflows/`: CI (lint + build + test) en cada push/PR; CD publica la
-imagen a GHCR tras un CI verde.
+`Dockerfile` (multi-stage, binario estático sobre imagen distroless, ~21 MB) en este repo.
+CI/CD en `.github/workflows/`: CI (lint + build + test) en cada push/PR; CD construye y
+publica la imagen a GHCR (`ghcr.io/tifacusil/go-data-receiving`, tags `latest` + sha) tras
+un CI verde.
+
+El despliegue real (las 3 instancias) vive en **tesis-infra**:
+`local/services/data-receiving/docker-compose.yml`. Este repo solo aporta la imagen.
+
+### Levantar en contenedor local
+
+Requiere la infra base (Redis, RabbitMQ, Consul) corriendo en la red Docker
+`landslide-net` — la levanta `tesis-infra/local/infra/docker-compose.yml`.
+
+**Opción A — replicar el despliegue completo (3 instancias)** vía el compose de tesis-infra.
+Construye la imagen con el tag que el compose espera y levántalo:
+
+```bash
+# 1. desde este repo: construir la imagen con el nombre que usa el compose
+docker build -f Dockerfile -t ghcr.io/tifacusil/go-data-receiving:latest .
+
+# 2. desde tesis-infra: levantar las 3 instancias
+cd <ruta>/tesis-infra/local/services/data-receiving
+docker compose up -d
+docker compose ps
+```
+
+Quedan en `5000/5001/5002` (TCP) y `8080/8081/8082` (HTTP). Verificar:
+
+```bash
+curl http://localhost:8080/health/   # {"status":"ok","checks":{"tcp":true,"redis":true,"rabbitmq":true}}
+curl http://localhost:8080/metrics   # exposición Prometheus
+curl http://localhost:8500/v1/health/service/data-receiving   # 3 instancias en Consul
+```
+
+**Opción B — una sola instancia** sin compose (prueba rápida), unida a `landslide-net` y
+usando los mismos valores `RECEIVER__*` que el env compartido de tesis-infra:
+
+```bash
+docker build -f Dockerfile -t go-data-receiving:local .
+
+docker run --rm --name data-receiving-local \
+  --network landslide-net \
+  -p 5000:5000 -p 8080:8080 \
+  -e RECEIVER__OUTPUTMODE=rabbitmq \
+  -e RECEIVER__PORT=5000 \
+  -e RECEIVER__DLXPATH=/tmp/dlx \
+  -e "RECEIVER__REDIS__CONNECTIONSTRING=redis:6379,password=changeme_redis" \
+  -e RECEIVER__RABBITMQ__HOST=rabbitmq-1 \
+  -e RECEIVER__RABBITMQ__USERNAME=data_receiving \
+  -e RECEIVER__RABBITMQ__PASSWORD=changeme_data_receiving \
+  -e RECEIVER__CONSUL__ADDRESS=http://consul-1:8500 \
+  -e RECEIVER__CONSUL__INSTANCEID=local-01 \
+  -e RECEIVER__CONSUL__HEALTHPORT=8080 \
+  -e RECEIVER__CONSUL__HEALTHCHECKHOST=data-receiving-local \
+  go-data-receiving:local
+```
+
+`HEALTHCHECKHOST` debe ser el hostname/nombre del contenedor (no `localhost`): Consul corre
+en otro contenedor y alcanza `/health` por ese nombre dentro de `landslide-net`.
 
 ---
 
@@ -206,15 +261,6 @@ Cada una se lista con **dónde** está en el código y **por qué** se aplicó.
   static nonroot (~21 MB). *Por qué:* menor superficie de ataque y arranque rápido; los
   schemas van embebidos, sin archivos extra en runtime.
 
-### Resumen: qué añade esta versión sobre el baseline C#
-
-| Práctica | Baseline C# | Esta versión |
-|---|---|---|
-| Health check | solo "TCP listening" | TCP + ping real Redis + RabbitMQ |
-| Métricas Prometheus | ausente | `/metrics` con throughput/latencia/CPU/mem |
-| Tracing OpenTelemetry | ausente | span por frame correlado por `message_id` |
-| Logging | texto | JSON estructurado con `message_id`/`instance_id` |
-| CDCT (Pact) | solo unit+integration | message pact AMQP productor↔consumidor |
 
 Lo demás (protocolo, CRC, serialización, flujo buffer→publish, retry 30s) se mantiene 1:1
 con el baseline a propósito, para que la comparación de rendimiento sea justa.
