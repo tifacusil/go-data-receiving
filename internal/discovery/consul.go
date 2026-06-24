@@ -67,7 +67,12 @@ func (r *Registration) register() error {
 	reg := &consul.AgentServiceRegistration{
 		ID:   r.serviceID,
 		Name: "data-receiving",
-		Port: r.cfg.HealthPort,
+		// Address debe ser la dirección por la que el resto del sistema alcanza
+		// esta instancia (mismo host que el check). Sin esto Consul devuelve
+		// ServiceAddress vacío y consul-template no puede armar el upstream de
+		// nginx → 502. Usa healthHost() (hostname del contenedor en la red).
+		Address: r.healthHost(),
+		Port:    r.cfg.HealthPort,
 		Tags: []string{
 			r.cfg.Environment,
 			"version:" + r.cfg.ServiceVersion,
