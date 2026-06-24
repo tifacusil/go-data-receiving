@@ -67,6 +67,10 @@ func (r RabbitMQConfig) ConfirmTimeout() time.Duration {
 
 // ConsulConfig — service discovery. Token comes from the secrets file.
 type ConsulConfig struct {
+	// Enabled gates the Consul registration. Default true (Wave 1 / compose). Set
+	// false when the platform provides discovery itself (e.g. Kubernetes Services),
+	// so the service does not depend on a reachable Consul to start.
+	Enabled        bool   `env:"ENABLED" envDefault:"true"`
 	Address        string `env:"ADDRESS" envDefault:"http://localhost:8500"`
 	Token          string `env:"TOKEN"`
 	InstanceID     string `env:"INSTANCEID" envDefault:"data-receiving-01"`

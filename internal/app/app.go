@@ -70,11 +70,18 @@ func Run(ctx context.Context, version string) error {
 			WithMetrics(metrics.Handler())
 		g.Go(func() error { return healthSrv.Run(ctx) })
 
-		reg, err := discovery.New(cfg.Consul, logger)
-		if err != nil {
-			return err
+		// El registro en Consul es opcional: en plataformas con discovery propio
+		// (Kubernetes) se desactiva con RECEIVER__CONSUL__ENABLED=false para no
+		// depender de un Consul alcanzable para arrancar.
+		if cfg.Consul.Enabled {
+			reg, err := discovery.New(cfg.Consul, logger)
+			if err != nil {
+				return err
+			}
+			g.Go(func() error { return reg.Run(ctx) })
+		} else {
+			logger.InfoContext(ctx, "consul deshabilitado (RECEIVER__CONSUL__ENABLED=false)")
 		}
-		g.Go(func() error { return reg.Run(ctx) })
 	} else {
 		out, err = buildLocalSink(cfg)
 		if err != nil {
