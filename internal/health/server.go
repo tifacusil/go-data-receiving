@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/AngelloFD/go-data-receiving/internal/docs"
 )
 
 // Server runs the embedded /health HTTP endpoint that Consul polls (and, when
@@ -44,6 +46,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics)
 	}
+	// Swagger UI + spec: GET /docs (UI), GET /docs/openapi.yaml (spec).
+	// Tras el gateway llega como /api/v1/receiving/docs/ (nginx hace rewrite).
+	docs.Register(mux)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),

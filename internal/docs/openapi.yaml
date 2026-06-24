@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: data-receiving
+  description: |
+    Endpoints HTTP operacionales del microservicio data-receiving (reescritura Go).
+    La ingesta de frames de sensores NO es HTTP: llega por TCP crudo (puertos
+    5000-5002) y se publica a RabbitMQ. Esta API solo expone health y métricas.
+  version: 1.0.0
+servers:
+  - url: /api/v1/receiving
+    description: Vía API Gateway (nginx)
+  - url: /
+    description: Acceso directo al contenedor
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Verifica conectividad real a las dependencias (RabbitMQ, Redis).
+      responses:
+        "200":
+          description: Servicio saludable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Una o más dependencias caídas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /metrics:
+    get:
+      summary: Métricas Prometheus
+      description: Exposición en formato texto Prometheus (CPU, memoria, throughput).
+      responses:
+        "200":
+          description: Métricas en formato Prometheus
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        checks:
+          type: object
+          additionalProperties:
+            type: string
