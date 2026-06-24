@@ -1,5 +1,5 @@
 // Package docs sirve la especificación OpenAPI y una UI de Swagger sobre el
-// http.ServeMux del health server (sin dependencias nuevas: los assets de
+// http.ServeMux del health server (sin librerías nuevas: los assets de
 // Swagger UI se cargan desde un CDN).
 //
 // data-receiving no expone API REST de negocio (la ingesta es TCP + RabbitMQ);

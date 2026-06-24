@@ -12,7 +12,8 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - misspell
+    # misspell omitido: los comentarios estan en espanol (falsos positivos en_US),
+    # igual que en el resto de microservicios del fleet.
     - bodyclose
     - errorlint
   exclusions:
