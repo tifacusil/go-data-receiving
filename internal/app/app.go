@@ -51,9 +51,12 @@ func Run(ctx context.Context, version string) error {
 	status := tcp.NewStatus()
 
 	// In rabbitmq mode the sink is backed by Redis + RabbitMQ and the
-	// RetryWorker, health endpoint and Consul registration run alongside the TCP
-	// server. Other modes use a local sink only and skip those workers.
+	// RetryWorker and Consul registration run alongside the TCP server. Other
+	// modes use a local sink only and skip those workers. The health/metrics/docs
+	// endpoint runs in every mode — it must expose whatever metrics.Handler()
+	// collects regardless of output mode.
 	var out sink.Sink
+	checker := health.NewChecker(status, nil, nil)
 	if cfg.OutputMode == "rabbitmq" {
 		rmq, err := newRabbitMQStack(cfg, logger)
 		if err != nil {
@@ -61,14 +64,8 @@ func Run(ctx context.Context, version string) error {
 		}
 		defer rmq.close(logger)
 		out = rmq.sink
+		checker = health.NewChecker(status, rmq.redis, rmq.rmqPing)
 		g.Go(func() error { return rmq.retry.Run(ctx) })
-
-		// Health check verifies the TCP listener AND pings Redis + RabbitMQ.
-		// The same server also exposes Prometheus /metrics.
-		checker := health.NewChecker(status, rmq.redis, rmq.rmqPing)
-		healthSrv := health.NewServer(cfg.Consul.HealthPort, checker, logger).
-			WithMetrics(metrics.Handler())
-		g.Go(func() error { return healthSrv.Run(ctx) })
 
 		// El registro en Consul es opcional: en plataformas con discovery propio
 		// (Kubernetes) se desactiva con RECEIVER__CONSUL__ENABLED=false para no
@@ -88,6 +85,14 @@ func Run(ctx context.Context, version string) error {
 			return err
 		}
 	}
+
+	// Health server runs in every mode: /health always checks the TCP listener
+	// (plus Redis + RabbitMQ when checker was built above with real pingers),
+	// and /metrics must expose whatever metrics.Handler() collects regardless
+	// of output mode.
+	healthSrv := health.NewServer(cfg.Consul.HealthPort, checker, logger).
+		WithMetrics(metrics.Handler())
+	g.Go(func() error { return healthSrv.Run(ctx) })
 
 	server := tcp.NewServer(cfg.Port, parser, out, dlx, status, logger).
 		WithObservability(metrics, tracer)
