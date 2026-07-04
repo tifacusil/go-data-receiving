@@ -21,6 +21,14 @@ type Metrics struct {
 	frameLatency prometheus.Histogram
 	published    prometheus.Counter
 	dropped      prometheus.Counter
+
+	// TCP connection tracking: this service's transport is TCP, not HTTP, so
+	// there is no request/response cycle to instrument generically like the
+	// other Go services' http_request_duration_seconds. These are the TCP
+	// equivalent of that coverage (accept rate, concurrent load, session length).
+	connsOpenedTotal prometheus.Counter
+	connsActive      prometheus.Gauge
+	connDuration     prometheus.Histogram
 }
 
 // NewMetrics builds and registers the collectors, including the Go runtime and
@@ -49,10 +57,26 @@ func NewMetrics() *Metrics {
 			Name: "data_receiving_messages_dropped_total",
 			Help: "Frames rejected and written to the dead-letter directory.",
 		}),
+		connsOpenedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "data_receiving_tcp_connections_opened_total",
+			Help: "Total TCP connections accepted.",
+		}),
+		connsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "data_receiving_tcp_connections_active",
+			Help: "TCP connections currently open.",
+		}),
+		connDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "data_receiving_tcp_connection_duration_seconds",
+			Help: "Wall-clock time a TCP connection stayed open.",
+			// DTUs typically hold a connection open for a session of frames;
+			// buckets span sub-second (bad connect) to tens of minutes.
+			Buckets: []float64{0.5, 1, 5, 15, 30, 60, 300, 600, 1800, 3600},
+		}),
 	}
 
 	reg.MustRegister(
 		m.framesTotal, m.frameLatency, m.published, m.dropped,
+		m.connsOpenedTotal, m.connsActive, m.connDuration,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -70,6 +94,19 @@ func (m *Metrics) IncPublished() { m.published.Inc() }
 
 // IncDropped increments the dead-lettered counter.
 func (m *Metrics) IncDropped() { m.dropped.Inc() }
+
+// ConnOpened records a new accepted TCP connection.
+func (m *Metrics) ConnOpened() {
+	m.connsOpenedTotal.Inc()
+	m.connsActive.Inc()
+}
+
+// ConnClosed records a TCP connection closing after having stayed open for
+// seconds. Pairs with ConnOpened; the gauge only ever moves through this pair.
+func (m *Metrics) ConnClosed(seconds float64) {
+	m.connsActive.Dec()
+	m.connDuration.Observe(seconds)
+}
 
 // Handler returns the /metrics HTTP handler for this registry.
 func (m *Metrics) Handler() http.Handler {

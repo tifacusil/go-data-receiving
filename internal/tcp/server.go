@@ -34,12 +34,15 @@ type DeadLetter interface {
 	Write(ctx context.Context, rawFrame []byte, perr *parsing.ParseError) error
 }
 
-// Observer records per-frame metrics. Satisfied by *observability.Metrics. It is
-// optional (nil = no metrics) so the server stays usable without observability.
+// Observer records per-frame and per-connection metrics. Satisfied by
+// *observability.Metrics. It is optional (nil = no metrics) so the server
+// stays usable without observability.
 type Observer interface {
 	ObserveFrame(result, sensorType string, seconds float64)
 	IncPublished()
 	IncDropped()
+	ConnOpened()
+	ConnClosed(seconds float64)
 }
 
 // Tracer opens a span per frame. Satisfied by *observability.Tracer. Optional.
@@ -125,7 +128,16 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
-	defer func() { _ = conn.Close() }()
+	connStart := time.Now()
+	if s.metrics != nil {
+		s.metrics.ConnOpened()
+	}
+	defer func() {
+		_ = conn.Close()
+		if s.metrics != nil {
+			s.metrics.ConnClosed(time.Since(connStart).Seconds())
+		}
+	}()
 
 	for {
 		if ctx.Err() != nil {

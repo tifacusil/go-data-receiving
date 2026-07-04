@@ -51,6 +51,25 @@ func TestMetrics_PublishedDropped(t *testing.T) {
 	}
 }
 
+func TestMetrics_TCPConnections(t *testing.T) {
+	m := NewMetrics()
+	m.ConnOpened()
+	m.ConnOpened()
+	m.ConnClosed(1.5)
+
+	body := scrape(t, m)
+	if !strings.Contains(body, "data_receiving_tcp_connections_opened_total 2") {
+		t.Fatalf("connections_opened_total not 2:\n%s", body)
+	}
+	// One closed of two opened => gauge should read 1.
+	if !strings.Contains(body, "data_receiving_tcp_connections_active 1") {
+		t.Fatalf("connections_active not 1 after one close:\n%s", body)
+	}
+	if !strings.Contains(body, "data_receiving_tcp_connection_duration_seconds_count 1") {
+		t.Fatal("connection_duration_seconds observation missing")
+	}
+}
+
 func TestMetrics_RuntimeCollectors(t *testing.T) {
 	m := NewMetrics()
 	body := scrape(t, m)
