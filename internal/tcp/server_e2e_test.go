@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,17 +174,33 @@ func TestE2E_CorruptCRC_DlxAndAck(t *testing.T) {
 // handleConn actually calls ConnOpened/ConnClosed), independent of the metric
 // storage logic already covered in the observability package.
 type countingObserver struct {
-	opened, closed int
-	lastDuration   float64
+	mu           sync.Mutex
+	opened       int
+	closed       int
+	lastDuration float64
 }
 
 func (c *countingObserver) ObserveFrame(string, string, float64) {}
 func (c *countingObserver) IncPublished()                        {}
 func (c *countingObserver) IncDropped()                          {}
-func (c *countingObserver) ConnOpened()                          { c.opened++ }
+
+func (c *countingObserver) ConnOpened() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.opened++
+}
+
 func (c *countingObserver) ConnClosed(seconds float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.closed++
 	c.lastDuration = seconds
+}
+
+func (c *countingObserver) snapshot() (opened, closed int, lastDuration float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.opened, c.closed, c.lastDuration
 }
 
 func TestE2E_TCPConnection_ObservedOpenAndClose(t *testing.T) {
@@ -216,17 +233,23 @@ func TestE2E_TCPConnection_ObservedOpenAndClose(t *testing.T) {
 
 	// handleConn runs in its own goroutine; give it a moment to observe the close.
 	deadline := time.Now().Add(2 * time.Second)
-	for obs.closed == 0 && time.Now().Before(deadline) {
+	var opened, closed int
+	var lastDuration float64
+	for {
+		opened, closed, lastDuration = obs.snapshot()
+		if closed != 0 || time.Now().After(deadline) {
+			break
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if obs.opened != 1 {
-		t.Fatalf("ConnOpened calls = %d, want 1", obs.opened)
+	if opened != 1 {
+		t.Fatalf("ConnOpened calls = %d, want 1", opened)
 	}
-	if obs.closed != 1 {
-		t.Fatalf("ConnClosed calls = %d, want 1", obs.closed)
+	if closed != 1 {
+		t.Fatalf("ConnClosed calls = %d, want 1", closed)
 	}
-	if obs.lastDuration < 0 {
-		t.Fatalf("connection duration = %v, want >= 0", obs.lastDuration)
+	if lastDuration < 0 {
+		t.Fatalf("connection duration = %v, want >= 0", lastDuration)
 	}
 }
