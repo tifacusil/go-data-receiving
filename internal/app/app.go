@@ -58,7 +58,7 @@ func Run(ctx context.Context, version string) error {
 	var out sink.Sink
 	checker := health.NewChecker(status, nil, nil)
 	if cfg.OutputMode == "rabbitmq" {
-		rmq, err := newRabbitMQStack(cfg, logger)
+		rmq, err := newRabbitMQStack(cfg, logger, metrics)
 		if err != nil {
 			return err
 		}

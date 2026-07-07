@@ -10,6 +10,7 @@ import (
 	"github.com/AngelloFD/go-data-receiving/internal/buffer"
 	"github.com/AngelloFD/go-data-receiving/internal/config"
 	"github.com/AngelloFD/go-data-receiving/internal/messaging"
+	"github.com/AngelloFD/go-data-receiving/internal/observability"
 	"github.com/AngelloFD/go-data-receiving/internal/sink"
 )
 
@@ -26,7 +27,7 @@ type rabbitmqStack struct {
 // newRabbitMQStack builds the Redis buffer, the AMQP connection/channel, the
 // confirm-mode publisher, the durable sink and the RetryWorker. Mirrors the
 // rabbitmq branch of the C# Program.cs DI setup.
-func newRabbitMQStack(cfg config.Config, logger *slog.Logger) (*rabbitmqStack, error) {
+func newRabbitMQStack(cfg config.Config, logger *slog.Logger, metrics *observability.Metrics) (*rabbitmqStack, error) {
 	redisBuf, err := buffer.NewRedis(cfg.Redis.ConnectionString, cfg.Redis.BufferTTL())
 	if err != nil {
 		return nil, fmt.Errorf("init redis buffer: %w", err)
@@ -59,7 +60,7 @@ func newRabbitMQStack(cfg config.Config, logger *slog.Logger) (*rabbitmqStack, e
 	}
 
 	out := sink.NewRabbitMQ(redisBuf, pub, logger)
-	retry := buffer.NewRetryWorker(redisBuf, pub, cfg.Redis.RetryInterval(), cfg.Redis.RetryMinAge(), logger)
+	retry := buffer.NewRetryWorker(redisBuf, pub, cfg.Redis.RetryInterval(), cfg.Redis.RetryMinAge(), logger, metrics)
 
 	return &rabbitmqStack{
 		redis:   redisBuf,

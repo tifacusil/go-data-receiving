@@ -164,7 +164,7 @@ func TestBrokerDown_PersistsThenRetryRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publisher: %v", err)
 	}
-	w := buffer.NewRetryWorker(buf, goodPub, time.Second, 0 /* minAge: retry immediately */, nil)
+	w := buffer.NewRetryWorker(buf, goodPub, time.Second, 0 /* minAge: retry immediately */, nil, nil)
 	// runPass is unexported; drive it via a short Run with a tiny interval.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

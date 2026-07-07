@@ -12,6 +12,12 @@ type Republisher interface {
 	PublishJSON(ctx context.Context, routingKey, envelopeJSON, messageID string) error
 }
 
+// BacklogGauge reports the buffer backlog size as a backpressure signal.
+// Declared here (consumer side) and satisfied by observability.Metrics.
+type BacklogGauge interface {
+	SetRedisBufferPending(n int64)
+}
+
 // RetryWorker periodically rescans the Redis buffer and republishes entries that
 // have been stuck longer than minAge (e.g. because RabbitMQ was down). Port of
 // the C# RetryWorker BackgroundService.
@@ -26,14 +32,15 @@ type RetryWorker struct {
 	interval time.Duration
 	minAge   time.Duration
 	logger   *slog.Logger
+	metrics  BacklogGauge // optional; nil disables the gauge
 }
 
-// NewRetryWorker wires a RetryWorker.
-func NewRetryWorker(b Buffer, pub Republisher, interval, minAge time.Duration, logger *slog.Logger) *RetryWorker {
+// NewRetryWorker wires a RetryWorker. metrics may be nil to disable the backlog gauge.
+func NewRetryWorker(b Buffer, pub Republisher, interval, minAge time.Duration, logger *slog.Logger, metrics BacklogGauge) *RetryWorker {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &RetryWorker{buffer: b, pub: pub, interval: interval, minAge: minAge, logger: logger}
+	return &RetryWorker{buffer: b, pub: pub, interval: interval, minAge: minAge, logger: logger, metrics: metrics}
 }
 
 // Run loops until ctx is cancelled, executing a retry pass every interval.
@@ -52,8 +59,13 @@ func (w *RetryWorker) Run(ctx context.Context) error {
 
 // runPass scans the buffer once and republishes everything older than minAge.
 func (w *RetryWorker) runPass(ctx context.Context) {
-	if count, err := w.buffer.Count(ctx); err == nil && count > 0 {
-		w.logger.InfoContext(ctx, "retry pass", slog.Int64("buffered", count))
+	if count, err := w.buffer.Count(ctx); err == nil {
+		if w.metrics != nil {
+			w.metrics.SetRedisBufferPending(count)
+		}
+		if count > 0 {
+			w.logger.InfoContext(ctx, "retry pass", slog.Int64("buffered", count))
+		}
 	}
 
 	msgs, err := w.buffer.ScanOld(ctx, w.minAge)

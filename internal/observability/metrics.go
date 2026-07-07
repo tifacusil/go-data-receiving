@@ -29,6 +29,11 @@ type Metrics struct {
 	connsOpenedTotal prometheus.Counter
 	connsActive      prometheus.Gauge
 	connDuration     prometheus.Histogram
+
+	// redisBufferPending is the backpressure signal: entries in sensor_buffer:*
+	// awaiting a RabbitMQ publisher confirm. A sustained climb means the broker
+	// (or the retry path) can't drain as fast as frames arrive.
+	redisBufferPending prometheus.Gauge
 }
 
 // NewMetrics builds and registers the collectors, including the Go runtime and
@@ -72,16 +77,23 @@ func NewMetrics() *Metrics {
 			// buckets span sub-second (bad connect) to tens of minutes.
 			Buckets: []float64{0.5, 1, 5, 15, 30, 60, 300, 600, 1800, 3600},
 		}),
+		redisBufferPending: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "data_receiving_redis_buffer_pending",
+			Help: "Entries in sensor_buffer:* awaiting RabbitMQ publisher confirm.",
+		}),
 	}
 
 	reg.MustRegister(
 		m.framesTotal, m.frameLatency, m.published, m.dropped,
-		m.connsOpenedTotal, m.connsActive, m.connDuration,
+		m.connsOpenedTotal, m.connsActive, m.connDuration, m.redisBufferPending,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	return m
 }
+
+// SetRedisBufferPending records the current sensor_buffer:* backlog size.
+func (m *Metrics) SetRedisBufferPending(n int64) { m.redisBufferPending.Set(float64(n)) }
 
 // ObserveFrame records the outcome and latency of one frame.
 func (m *Metrics) ObserveFrame(result, sensorType string, seconds float64) {

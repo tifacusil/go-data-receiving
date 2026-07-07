@@ -51,10 +51,20 @@ func (p *fakePub) PublishJSON(_ context.Context, _, _, _ string) error {
 	return p.err
 }
 
+type fakeGauge struct {
+	lastValue int64
+	calls     int
+}
+
+func (g *fakeGauge) SetRedisBufferPending(n int64) {
+	g.lastValue = n
+	g.calls++
+}
+
 func TestRetryWorker_Pass_RepublishesAndDeletes(t *testing.T) {
 	buf := newFakeBuffer(BufferedMessage{MessageID: "m1", RoutingKey: "sensors.shangtan.gnss"})
 	pub := &fakePub{}
-	w := NewRetryWorker(buf, pub, time.Second, time.Minute, nil)
+	w := NewRetryWorker(buf, pub, time.Second, time.Minute, nil, nil)
 
 	w.runPass(context.Background())
 
@@ -69,7 +79,7 @@ func TestRetryWorker_Pass_RepublishesAndDeletes(t *testing.T) {
 func TestRetryWorker_Pass_PublishFails_KeepsEntry(t *testing.T) {
 	buf := newFakeBuffer(BufferedMessage{MessageID: "m1", RoutingKey: "sensors.shangtan.gnss"})
 	pub := &fakePub{err: errors.New("still down")}
-	w := NewRetryWorker(buf, pub, time.Second, time.Minute, nil)
+	w := NewRetryWorker(buf, pub, time.Second, time.Minute, nil, nil)
 
 	w.runPass(context.Background())
 
@@ -78,9 +88,28 @@ func TestRetryWorker_Pass_PublishFails_KeepsEntry(t *testing.T) {
 	}
 }
 
+func TestRetryWorker_Pass_ReportsBacklogGauge(t *testing.T) {
+	buf := newFakeBuffer(
+		BufferedMessage{MessageID: "m1", RoutingKey: "sensors.shangtan.gnss"},
+		BufferedMessage{MessageID: "m2", RoutingKey: "sensors.shangtan.gnss"},
+	)
+	pub := &fakePub{err: errors.New("still down")} // keep both entries buffered
+	gauge := &fakeGauge{}
+	w := NewRetryWorker(buf, pub, time.Second, time.Minute, nil, gauge)
+
+	w.runPass(context.Background())
+
+	if gauge.calls != 1 {
+		t.Fatalf("gauge calls = %d, want 1", gauge.calls)
+	}
+	if gauge.lastValue != 2 {
+		t.Fatalf("gauge value = %d, want 2", gauge.lastValue)
+	}
+}
+
 func TestRetryWorker_Run_StopsOnContextCancel(t *testing.T) {
 	buf := newFakeBuffer()
-	w := NewRetryWorker(buf, &fakePub{}, 10*time.Millisecond, time.Minute, nil)
+	w := NewRetryWorker(buf, &fakePub{}, 10*time.Millisecond, time.Minute, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
